@@ -17,7 +17,7 @@ Go 1.23 or newer is required.
 Recommended fixed version:
 
 ```bash
-go install github.com/yorha2B0826/gogetx@v0.1.1
+go install github.com/yorha2B0826/gogetx@v0.1.2
 ```
 
 Latest version:
@@ -88,6 +88,8 @@ go mod init example.com/myapp
 - `--yes`: skip the final confirmation; it does not choose a search result.
 - `--first`: choose the first search result without interactive selection.
 - Use `--first --yes` for scripts or non-interactive environments.
+- By default, `gogetx add` does not run `go mod tidy`, so newly added packages remain in `go.mod` / `go.sum` before you import them.
+- `--tidy`: additionally run `go mod tidy` after `go get`. If your source code does not import the package yet, Go may remove the newly added dependency.
 - `--dry-run` only prints commands and never runs `go get` or `go mod tidy`.
 - Without `--yes`, the final confirmation defaults to `Y/n`; pressing Enter continues.
 

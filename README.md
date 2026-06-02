@@ -17,7 +17,7 @@
 推荐安装固定版本：
 
 ```bash
-go install github.com/yorha2B0826/gogetx@v0.1.1
+go install github.com/yorha2B0826/gogetx@v0.1.2
 ```
 
 也可以安装最新版本：
@@ -88,6 +88,8 @@ go mod init example.com/myapp
 - `--yes`：跳过最终确认，不负责选择搜索结果。
 - `--first`：明确选择第一条搜索结果，不进入交互选择。
 - 脚本或非交互环境建议同时使用 `--first --yes`。
+- 默认不运行 `go mod tidy`，确保刚添加但尚未 import 的依赖会保留在 `go.mod` / `go.sum` 中。
+- `--tidy`：在 `go get` 后额外运行 `go mod tidy`。如果项目源码还没有 import 该包，Go 可能会把刚添加的依赖移除。
 - `--dry-run` 只打印命令，不执行 `go get` 或 `go mod tidy`。
 - 不带 `--yes` 时，最终确认默认是 `Y/n`；直接回车会继续执行。
 

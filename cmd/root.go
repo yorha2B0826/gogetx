@@ -121,7 +121,7 @@ func newAddCommand(app *App) *cobra.Command {
 	}
 	addSearchFlags(command, &opts)
 	command.Flags().StringVar(&version, "version", "latest", "version to install")
-	command.Flags().BoolVar(&tidy, "tidy", true, "run go mod tidy after go get")
+	command.Flags().BoolVar(&tidy, "tidy", false, "run go mod tidy after go get")
 	command.Flags().BoolVar(&yes, "yes", false, "skip confirmation before running go get")
 	command.Flags().BoolVar(&first, "first", false, "select the first search result without prompting")
 	command.Flags().BoolVar(&dryRun, "dry-run", false, "print commands without executing them")

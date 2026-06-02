@@ -245,6 +245,50 @@ func TestAddFirstYesSelectsFirstResultAndSkipsConfirmation(t *testing.T) {
 	}
 }
 
+func TestAddDoesNotRunTidyByDefault(t *testing.T) {
+	t.Parallel()
+
+	searcher := &fakeSearcher{results: []packageinfo.PackageCandidate{{
+		PackagePath: "go.uber.org/zap",
+		ModulePath:  "go.uber.org/zap",
+	}}}
+	runner := &fakeRunner{inside: true}
+	root := NewRootCommand(testApp(searcher, runner))
+
+	_, _, err := executeCommand(root, "add", "zap", "--first", "--yes")
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	if !runner.getCalled {
+		t.Fatal("runner Get was not called")
+	}
+	if runner.tidyCalled {
+		t.Fatal("runner ModTidy was called; add should preserve newly added dependencies by default")
+	}
+}
+
+func TestAddRunsTidyWhenRequested(t *testing.T) {
+	t.Parallel()
+
+	searcher := &fakeSearcher{results: []packageinfo.PackageCandidate{{
+		PackagePath: "go.uber.org/zap",
+		ModulePath:  "go.uber.org/zap",
+	}}}
+	runner := &fakeRunner{inside: true}
+	root := NewRootCommand(testApp(searcher, runner))
+
+	_, _, err := executeCommand(root, "add", "zap", "--first", "--yes", "--tidy")
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	if !runner.getCalled {
+		t.Fatal("runner Get was not called")
+	}
+	if !runner.tidyCalled {
+		t.Fatal("runner ModTidy was not called")
+	}
+}
+
 func TestAddConfirmationMessageDoesNotIncludeTrailingQuestionMark(t *testing.T) {
 	t.Parallel()
 

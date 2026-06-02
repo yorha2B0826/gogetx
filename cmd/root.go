@@ -23,6 +23,7 @@ func NewRootCommand(app *App) *Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
+	root.CompletionOptions.DisableDefaultCmd = true
 	root.AddCommand(newSearchCommand(app))
 	root.AddCommand(newAddCommand(app))
 	root.AddCommand(newVersionsCommand(app))
@@ -31,6 +32,7 @@ func NewRootCommand(app *App) *Command {
 	root.AddCommand(newFavCommand(app))
 	root.AddCommand(newAddFavCommand(app))
 	root.AddCommand(newRmFavCommand(app))
+	root.AddCommand(newCompletionCommand(root))
 	return root
 }
 
@@ -99,7 +101,7 @@ func newAddCommand(app *App) *cobra.Command {
 				return nil
 			}
 			if !yes {
-				ok, err := app.Selector.Confirm("Run " + commandLine + "?")
+				ok, err := app.Selector.Confirm("Run " + commandLine)
 				if err != nil {
 					return err
 				}

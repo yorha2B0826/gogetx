@@ -76,9 +76,10 @@ func (f fakeFavorites) AddFavorite(_, _ string) error { return nil }
 func (f fakeFavorites) RemoveFavorite(_ string) error { return nil }
 
 type fakeSelector struct {
-	selectedIndex int
-	selectCalled  bool
-	confirmCalled bool
+	selectedIndex  int
+	selectCalled   bool
+	confirmCalled  bool
+	confirmMessage string
 }
 
 func (f *fakeSelector) Select(results []packageinfo.PackageCandidate) (packageinfo.PackageCandidate, error) {
@@ -92,8 +93,9 @@ func (f *fakeSelector) Select(results []packageinfo.PackageCandidate) (packagein
 	return results[f.selectedIndex], nil
 }
 
-func (f *fakeSelector) Confirm(_ string) (bool, error) {
+func (f *fakeSelector) Confirm(message string) (bool, error) {
 	f.confirmCalled = true
+	f.confirmMessage = message
 	return true, nil
 }
 
@@ -240,6 +242,26 @@ func TestAddFirstYesSelectsFirstResultAndSkipsConfirmation(t *testing.T) {
 	}
 	if runner.getCalled || runner.tidyCalled {
 		t.Fatalf("runner called during dry-run: get=%v tidy=%v", runner.getCalled, runner.tidyCalled)
+	}
+}
+
+func TestAddConfirmationMessageDoesNotIncludeTrailingQuestionMark(t *testing.T) {
+	t.Parallel()
+
+	searcher := &fakeSearcher{results: []packageinfo.PackageCandidate{{
+		PackagePath: "go.uber.org/zap",
+		ModulePath:  "go.uber.org/zap",
+	}}}
+	runner := &fakeRunner{inside: true}
+	selector := &fakeSelector{}
+	root := NewRootCommand(testAppWithSelector(searcher, runner, selector))
+
+	_, _, err := executeCommand(root, "add", "zap", "--first", "--no-cache")
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	if selector.confirmMessage != "Run go get go.uber.org/zap@latest" {
+		t.Fatalf("confirmMessage = %q, want command without trailing question mark", selector.confirmMessage)
 	}
 }
 

@@ -17,7 +17,7 @@ Go 1.23 or newer is required.
 Recommended fixed version:
 
 ```bash
-go install github.com/yorha2B0826/gogetx@v0.1.0
+go install github.com/yorha2B0826/gogetx@v0.1.1
 ```
 
 Latest version:
@@ -31,6 +31,21 @@ Local development:
 ```bash
 go run . search zap
 go run . add zap --dry-run --first --yes
+```
+
+Install shell completion:
+
+```bash
+gogetx completion install
+```
+
+`completion install` detects the current `$SHELL` automatically. You can also specify one explicitly:
+
+```bash
+gogetx completion install zsh
+gogetx completion install bash
+gogetx completion install fish
+gogetx completion install powershell
 ```
 
 ## Commands
@@ -74,6 +89,7 @@ go mod init example.com/myapp
 - `--first`: choose the first search result without interactive selection.
 - Use `--first --yes` for scripts or non-interactive environments.
 - `--dry-run` only prints commands and never runs `go get` or `go mod tidy`.
+- Without `--yes`, the final confirmation defaults to `Y/n`; pressing Enter continues.
 
 Example:
 
@@ -88,6 +104,8 @@ Selected: go.uber.org/zap
 Resolved module: go.uber.org/zap
 Command: go get go.uber.org/zap@latest
 ```
+
+The interactive selection list renders each candidate as a single truncated line. This avoids redraw drift when long package descriptions would otherwise wrap in the terminal.
 
 ## Search Sources
 

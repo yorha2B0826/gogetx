@@ -17,7 +17,7 @@
 推荐安装固定版本：
 
 ```bash
-go install github.com/yorha2B0826/gogetx@v0.1.0
+go install github.com/yorha2B0826/gogetx@v0.1.1
 ```
 
 也可以安装最新版本：
@@ -31,6 +31,21 @@ go install github.com/yorha2B0826/gogetx@latest
 ```bash
 go run . search zap
 go run . add zap --dry-run --first --yes
+```
+
+安装 shell 补全：
+
+```bash
+gogetx completion install
+```
+
+`completion install` 会根据当前 `$SHELL` 自动选择 shell，也可以显式指定：
+
+```bash
+gogetx completion install zsh
+gogetx completion install bash
+gogetx completion install fish
+gogetx completion install powershell
 ```
 
 ## 常用命令
@@ -74,6 +89,7 @@ go mod init example.com/myapp
 - `--first`：明确选择第一条搜索结果，不进入交互选择。
 - 脚本或非交互环境建议同时使用 `--first --yes`。
 - `--dry-run` 只打印命令，不执行 `go get` 或 `go mod tidy`。
+- 不带 `--yes` 时，最终确认默认是 `Y/n`；直接回车会继续执行。
 
 示例：
 
@@ -88,6 +104,8 @@ Selected: go.uber.org/zap
 Resolved module: go.uber.org/zap
 Command: go get go.uber.org/zap@latest
 ```
+
+交互选择列表会把每个候选项压缩为单行显示，避免过长简介在终端里换行后造成选项重绘偏移。
 
 ## 搜索来源
 

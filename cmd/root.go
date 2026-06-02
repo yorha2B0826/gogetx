@@ -66,6 +66,7 @@ func newAddCommand(app *App) *cobra.Command {
 	var tidy bool
 	var yes bool
 	var dryRun bool
+	var first bool
 
 	command := &cobra.Command{
 		Use:   "add <keyword>",
@@ -80,7 +81,7 @@ func newAddCommand(app *App) *cobra.Command {
 				return fmt.Errorf("current directory is not inside a Go module; run `go mod init <module>` first")
 			}
 
-			selected, err := selectCandidate(cmd, app, args[0], opts, yes)
+			selected, err := selectCandidate(cmd, app, args[0], opts, first)
 			if err != nil {
 				return err
 			}
@@ -119,7 +120,8 @@ func newAddCommand(app *App) *cobra.Command {
 	addSearchFlags(command, &opts)
 	command.Flags().StringVar(&version, "version", "latest", "version to install")
 	command.Flags().BoolVar(&tidy, "tidy", true, "run go mod tidy after go get")
-	command.Flags().BoolVar(&yes, "yes", false, "accept the first result and skip confirmation")
+	command.Flags().BoolVar(&yes, "yes", false, "skip confirmation before running go get")
+	command.Flags().BoolVar(&first, "first", false, "select the first search result without prompting")
 	command.Flags().BoolVar(&dryRun, "dry-run", false, "print commands without executing them")
 	return command
 }
@@ -239,7 +241,7 @@ func addSearchFlags(command *cobra.Command, opts *packageinfo.SearchOptions) {
 	command.Flags().BoolVar(&opts.Refresh, "refresh", false, "refresh cached search results")
 }
 
-func selectCandidate(cmd *cobra.Command, app *App, keyword string, opts packageinfo.SearchOptions, yes bool) (packageinfo.PackageCandidate, error) {
+func selectCandidate(cmd *cobra.Command, app *App, keyword string, opts packageinfo.SearchOptions, first bool) (packageinfo.PackageCandidate, error) {
 	if modulePath, ok, err := app.Favorites.Favorite(keyword); err != nil {
 		return packageinfo.PackageCandidate{}, err
 	} else if ok {
@@ -258,7 +260,7 @@ func selectCandidate(cmd *cobra.Command, app *App, keyword string, opts packagei
 	if len(results) == 0 {
 		return packageinfo.PackageCandidate{}, fmt.Errorf("no results found for %q", keyword)
 	}
-	if yes || len(results) == 1 {
+	if first || len(results) == 1 {
 		fmt.Fprintf(cmd.OutOrStdout(), "Selected: %s\n", results[0].PackagePath)
 		return results[0], nil
 	}

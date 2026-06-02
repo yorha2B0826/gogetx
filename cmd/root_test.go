@@ -75,16 +75,27 @@ func (f fakeFavorites) Favorites() (map[string]string, error) {
 func (f fakeFavorites) AddFavorite(_, _ string) error { return nil }
 func (f fakeFavorites) RemoveFavorite(_ string) error { return nil }
 
-type fakeSelector struct{}
+type fakeSelector struct {
+	selectedIndex int
+	selectCalled  bool
+	confirmCalled bool
+}
 
-func (fakeSelector) Select(results []packageinfo.PackageCandidate) (packageinfo.PackageCandidate, error) {
+func (f *fakeSelector) Select(results []packageinfo.PackageCandidate) (packageinfo.PackageCandidate, error) {
 	if len(results) == 0 {
 		return packageinfo.PackageCandidate{}, errors.New("no results")
 	}
-	return results[0], nil
+	f.selectCalled = true
+	if f.selectedIndex >= len(results) {
+		return packageinfo.PackageCandidate{}, errors.New("selected index out of range")
+	}
+	return results[f.selectedIndex], nil
 }
 
-func (fakeSelector) Confirm(_ string) (bool, error) { return true, nil }
+func (f *fakeSelector) Confirm(_ string) (bool, error) {
+	f.confirmCalled = true
+	return true, nil
+}
 
 type fakeLatest struct{}
 
@@ -112,12 +123,16 @@ func executeCommand(root *Command, args ...string) (string, string, error) {
 }
 
 func testApp(searcher *fakeSearcher, runner *fakeRunner) *App {
+	return testAppWithSelector(searcher, runner, &fakeSelector{})
+}
+
+func testAppWithSelector(searcher *fakeSearcher, runner *fakeRunner, selector *fakeSelector) *App {
 	return &App{
 		Searcher:  searcher,
 		Resolver:  fakeResolver{modulePath: "go.uber.org/zap"},
 		Runner:    runner,
 		Favorites: fakeFavorites{values: map[string]string{}},
-		Selector:  fakeSelector{},
+		Selector:  selector,
 		Latest:    fakeLatest{},
 		Opener:    &fakeOpener{},
 	}
@@ -164,6 +179,64 @@ func TestAddDryRunDoesNotRunGoGet(t *testing.T) {
 	}
 	if !strings.Contains(stdout, "go get go.uber.org/zap@latest") {
 		t.Fatalf("stdout = %q, want dry-run go get command", stdout)
+	}
+	if runner.getCalled || runner.tidyCalled {
+		t.Fatalf("runner called during dry-run: get=%v tidy=%v", runner.getCalled, runner.tidyCalled)
+	}
+}
+
+func TestAddYesDoesNotSelectFirstResult(t *testing.T) {
+	t.Parallel()
+
+	searcher := &fakeSearcher{results: []packageinfo.PackageCandidate{
+		{PackagePath: "example.com/first", ModulePath: "example.com/first"},
+		{PackagePath: "go.uber.org/zap", ModulePath: "go.uber.org/zap"},
+	}}
+	runner := &fakeRunner{inside: true}
+	selector := &fakeSelector{selectedIndex: 1}
+	root := NewRootCommand(testAppWithSelector(searcher, runner, selector))
+
+	stdout, _, err := executeCommand(root, "add", "zap", "--dry-run", "--yes")
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	if !selector.selectCalled {
+		t.Fatal("selector was not called; --yes should not choose the first result")
+	}
+	if selector.confirmCalled {
+		t.Fatal("confirm was called; --yes should skip confirmation")
+	}
+	if strings.Contains(stdout, "example.com/first") {
+		t.Fatalf("stdout = %q, want selected package instead of first result", stdout)
+	}
+	if !strings.Contains(stdout, "go get go.uber.org/zap@latest") {
+		t.Fatalf("stdout = %q, want selected dry-run command", stdout)
+	}
+}
+
+func TestAddFirstYesSelectsFirstResultAndSkipsConfirmation(t *testing.T) {
+	t.Parallel()
+
+	searcher := &fakeSearcher{results: []packageinfo.PackageCandidate{
+		{PackagePath: "go.uber.org/zap", ModulePath: "go.uber.org/zap"},
+		{PackagePath: "example.com/second", ModulePath: "example.com/second"},
+	}}
+	runner := &fakeRunner{inside: true}
+	selector := &fakeSelector{selectedIndex: 1}
+	root := NewRootCommand(testAppWithSelector(searcher, runner, selector))
+
+	stdout, _, err := executeCommand(root, "add", "zap", "--dry-run", "--first", "--yes")
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	if selector.selectCalled {
+		t.Fatal("selector was called; --first should choose the first result")
+	}
+	if selector.confirmCalled {
+		t.Fatal("confirm was called; --yes should skip confirmation")
+	}
+	if !strings.Contains(stdout, "Selected: go.uber.org/zap") {
+		t.Fatalf("stdout = %q, want first result selection", stdout)
 	}
 	if runner.getCalled || runner.tidyCalled {
 		t.Fatalf("runner called during dry-run: get=%v tidy=%v", runner.getCalled, runner.tidyCalled)

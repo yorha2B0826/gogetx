@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -17,12 +18,16 @@ type fakeSearcher struct {
 	called  bool
 	keyword string
 	opts    packageinfo.SearchOptions
+	search  func(keyword string, opts packageinfo.SearchOptions) ([]packageinfo.PackageCandidate, error)
 }
 
 func (f *fakeSearcher) Search(_ context.Context, keyword string, opts packageinfo.SearchOptions) ([]packageinfo.PackageCandidate, error) {
 	f.called = true
 	f.keyword = keyword
 	f.opts = opts
+	if f.search != nil {
+		return f.search(keyword, opts)
+	}
 	return f.results, nil
 }
 
@@ -94,6 +99,7 @@ type fakeSelector struct {
 	selectCalled   bool
 	confirmCalled  bool
 	confirmMessage string
+	selectFunc     func(results []packageinfo.PackageCandidate) (packageinfo.PackageCandidate, error)
 }
 
 func (f *fakeSelector) Select(results []packageinfo.PackageCandidate) (packageinfo.PackageCandidate, error) {
@@ -101,6 +107,9 @@ func (f *fakeSelector) Select(results []packageinfo.PackageCandidate) (packagein
 		return packageinfo.PackageCandidate{}, errors.New("no results")
 	}
 	f.selectCalled = true
+	if f.selectFunc != nil {
+		return f.selectFunc(results)
+	}
 	if f.selectedIndex >= len(results) {
 		return packageinfo.PackageCandidate{}, errors.New("selected index out of range")
 	}
@@ -236,6 +245,24 @@ func TestSearchFlagsArePassedToSearcher(t *testing.T) {
 	}
 }
 
+func TestSearchUsesDefaultLimit(t *testing.T) {
+	t.Parallel()
+
+	searcher := &fakeSearcher{results: []packageinfo.PackageCandidate{{
+		PackagePath: "go.uber.org/zap",
+		ModulePath:  "go.uber.org/zap",
+	}}}
+	root := NewRootCommand(testApp(searcher, &fakeRunner{inside: true}))
+
+	_, _, err := executeCommand(root, "search", "zap")
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	if searcher.opts.Limit != packageinfo.DefaultSearchLimit {
+		t.Fatalf("limit = %d, want default %d", searcher.opts.Limit, packageinfo.DefaultSearchLimit)
+	}
+}
+
 func TestAddDryRunDoesNotRunGoGet(t *testing.T) {
 	t.Parallel()
 
@@ -255,6 +282,74 @@ func TestAddDryRunDoesNotRunGoGet(t *testing.T) {
 	}
 	if runner.getCalled || runner.tidyCalled {
 		t.Fatalf("runner called during dry-run: get=%v tidy=%v", runner.getCalled, runner.tidyCalled)
+	}
+}
+
+func TestAddCanLoadMoreInteractiveResults(t *testing.T) {
+	t.Parallel()
+
+	var limits []int
+	target := packageinfo.PackageCandidate{
+		PackagePath: "github.com/air-verse/air",
+		ModulePath:  "github.com/air-verse/air",
+	}
+	searcher := &fakeSearcher{
+		search: func(_ string, opts packageinfo.SearchOptions) ([]packageinfo.PackageCandidate, error) {
+			limits = append(limits, opts.Limit)
+			count := opts.Limit
+			if count > 36 {
+				count = 36
+			}
+			results := make([]packageinfo.PackageCandidate, 0, count)
+			for i := 0; i < count; i++ {
+				results = append(results, packageinfo.PackageCandidate{
+					PackagePath: fmt.Sprintf("example.com/pkg%d", i+1),
+					ModulePath:  fmt.Sprintf("example.com/pkg%d", i+1),
+				})
+			}
+			if opts.Limit >= 50 {
+				results[len(results)-1] = target
+			}
+			return results, nil
+		},
+	}
+	selector := &fakeSelector{
+		selectFunc: func(results []packageinfo.PackageCandidate) (packageinfo.PackageCandidate, error) {
+			for _, result := range results {
+				if isLoadMoreCandidate(result) {
+					return result, nil
+				}
+			}
+			for _, result := range results {
+				if result.PackagePath == target.PackagePath {
+					return result, nil
+				}
+			}
+			return packageinfo.PackageCandidate{}, errors.New("target result not found")
+		},
+	}
+	root := NewRootCommand(&App{
+		Searcher:  searcher,
+		Resolver:  &fakeResolver{modulePath: target.ModulePath},
+		Runner:    &fakeRunner{inside: true},
+		Favorites: fakeFavorites{values: map[string]string{}},
+		Selector:  selector,
+		Latest:    &fakeLatest{},
+		Opener:    &fakeOpener{},
+	})
+
+	stdout, _, err := executeCommand(root, "add", "air", "--dry-run", "--yes", "--no-cache")
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	if len(limits) != 2 || limits[0] != packageinfo.DefaultSearchLimit || limits[1] != packageinfo.DefaultSearchLimit+searchLimitStep {
+		t.Fatalf("limits = %v, want [30 50]", limits)
+	}
+	if !strings.Contains(stdout, "Loading up to 50 results") {
+		t.Fatalf("stdout = %q, want load more message", stdout)
+	}
+	if !strings.Contains(stdout, "go get github.com/air-verse/air@latest") {
+		t.Fatalf("stdout = %q, want selected air command", stdout)
 	}
 }
 

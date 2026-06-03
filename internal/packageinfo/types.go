@@ -4,6 +4,8 @@ const (
 	SourcePkgsite = "pkgsite"
 	SourceGitHub  = "github"
 	SourceAll     = "all"
+
+	DefaultSearchLimit = 30
 )
 
 type PackageCandidate struct {
@@ -23,7 +25,7 @@ type SearchOptions struct {
 
 func NormalizeSearchOptions(opts SearchOptions) SearchOptions {
 	if opts.Limit <= 0 {
-		opts.Limit = 10
+		opts.Limit = DefaultSearchLimit
 	}
 	if opts.Source == "" {
 		opts.Source = SourcePkgsite

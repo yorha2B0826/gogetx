@@ -12,6 +12,12 @@ import (
 	"github.com/yorha2B0826/gogetx/internal/packageinfo"
 )
 
+const (
+	maxInteractiveSearchLimit = 100
+	searchLimitStep           = 20
+	loadMoreSource            = "__gogetx_load_more__"
+)
+
 func NewRootCommand(app *App) *Command {
 	if app == nil {
 		app = NewDefaultApp()
@@ -41,7 +47,7 @@ func NewRootCommand(app *App) *Command {
 }
 
 func newSearchCommand(app *App) *cobra.Command {
-	opts := packageinfo.SearchOptions{Limit: 10, Source: packageinfo.SourcePkgsite}
+	opts := packageinfo.SearchOptions{Limit: packageinfo.DefaultSearchLimit, Source: packageinfo.SourcePkgsite}
 	var jsonOutput bool
 	command := &cobra.Command{
 		Use:   "search <keyword>",
@@ -67,7 +73,7 @@ func newSearchCommand(app *App) *cobra.Command {
 }
 
 func newAddCommand(app *App) *cobra.Command {
-	opts := packageinfo.SearchOptions{Limit: 10, Source: packageinfo.SourcePkgsite}
+	opts := packageinfo.SearchOptions{Limit: packageinfo.DefaultSearchLimit, Source: packageinfo.SourcePkgsite}
 	var version string
 	var tidy bool
 	var yes bool
@@ -277,7 +283,7 @@ func newRmFavCommand(app *App) *cobra.Command {
 }
 
 func addSearchFlags(command *cobra.Command, opts *packageinfo.SearchOptions) {
-	command.Flags().IntVar(&opts.Limit, "limit", 10, "maximum number of results")
+	command.Flags().IntVar(&opts.Limit, "limit", packageinfo.DefaultSearchLimit, "maximum number of search results")
 	command.Flags().StringVar(&opts.Source, "source", packageinfo.SourcePkgsite, "search source: pkgsite, github, or all")
 	command.Flags().BoolVar(&opts.NoCache, "no-cache", false, "disable search cache")
 	command.Flags().BoolVar(&opts.Refresh, "refresh", false, "refresh cached search results")
@@ -295,18 +301,68 @@ func selectCandidate(cmd *cobra.Command, app *App, keyword string, opts packagei
 		}, nil
 	}
 
-	results, err := app.Searcher.Search(cmd.Context(), keyword, opts)
-	if err != nil {
-		return packageinfo.PackageCandidate{}, err
+	for {
+		results, err := app.Searcher.Search(cmd.Context(), keyword, opts)
+		if err != nil {
+			return packageinfo.PackageCandidate{}, err
+		}
+		if len(results) == 0 {
+			return packageinfo.PackageCandidate{}, fmt.Errorf("no results found for %q", keyword)
+		}
+		if first || len(results) == 1 {
+			fmt.Fprintf(cmd.OutOrStdout(), "Selected: %s\n", results[0].PackagePath)
+			return results[0], nil
+		}
+
+		selectionResults := appendLoadMoreCandidate(results, opts)
+		selected, err := app.Selector.Select(selectionResults)
+		if err != nil {
+			return packageinfo.PackageCandidate{}, err
+		}
+		if !isLoadMoreCandidate(selected) {
+			return selected, nil
+		}
+		nextLimit := nextSearchLimit(opts.Limit)
+		if nextLimit <= opts.Limit {
+			return packageinfo.PackageCandidate{}, fmt.Errorf("no more results can be loaded; try a more specific keyword")
+		}
+		opts.Limit = nextLimit
+		opts.Refresh = true
+		fmt.Fprintf(cmd.OutOrStdout(), "Loading up to %d results...\n", opts.Limit)
 	}
-	if len(results) == 0 {
-		return packageinfo.PackageCandidate{}, fmt.Errorf("no results found for %q", keyword)
+}
+
+func appendLoadMoreCandidate(results []packageinfo.PackageCandidate, opts packageinfo.SearchOptions) []packageinfo.PackageCandidate {
+	if len(results) < opts.Limit || opts.Limit >= maxInteractiveSearchLimit {
+		return results
 	}
-	if first || len(results) == 1 {
-		fmt.Fprintf(cmd.OutOrStdout(), "Selected: %s\n", results[0].PackagePath)
-		return results[0], nil
+	nextLimit := nextSearchLimit(opts.Limit)
+	if nextLimit <= opts.Limit {
+		return results
 	}
-	return app.Selector.Select(results)
+	out := make([]packageinfo.PackageCandidate, 0, len(results)+1)
+	out = append(out, results...)
+	out = append(out, packageinfo.PackageCandidate{
+		PackagePath: fmt.Sprintf("Load more results (show up to %d)", nextLimit),
+		Synopsis:    "Fetch a larger result set for this keyword.",
+		Source:      loadMoreSource,
+	})
+	return out
+}
+
+func nextSearchLimit(limit int) int {
+	if limit <= 0 {
+		return packageinfo.DefaultSearchLimit
+	}
+	next := limit + searchLimitStep
+	if next > maxInteractiveSearchLimit {
+		return maxInteractiveSearchLimit
+	}
+	return next
+}
+
+func isLoadMoreCandidate(candidate packageinfo.PackageCandidate) bool {
+	return candidate.Source == loadMoreSource
 }
 
 func printCandidates(cmd *cobra.Command, results []packageinfo.PackageCandidate) {

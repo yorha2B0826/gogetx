@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"strings"
 	"testing"
 
@@ -14,11 +13,13 @@ import (
 )
 
 type fakeSearcher struct {
-	results []packageinfo.PackageCandidate
-	called  bool
-	keyword string
-	opts    packageinfo.SearchOptions
-	search  func(keyword string, opts packageinfo.SearchOptions) ([]packageinfo.PackageCandidate, error)
+	results    []packageinfo.PackageCandidate
+	called     bool
+	keyword    string
+	opts       packageinfo.SearchOptions
+	pageOpts   []packageinfo.SearchOptions
+	search     func(keyword string, opts packageinfo.SearchOptions) ([]packageinfo.PackageCandidate, error)
+	searchPage func(keyword string, opts packageinfo.SearchOptions) (packageinfo.SearchPage, error)
 }
 
 func (f *fakeSearcher) Search(_ context.Context, keyword string, opts packageinfo.SearchOptions) ([]packageinfo.PackageCandidate, error) {
@@ -29,6 +30,24 @@ func (f *fakeSearcher) Search(_ context.Context, keyword string, opts packageinf
 		return f.search(keyword, opts)
 	}
 	return f.results, nil
+}
+
+func (f *fakeSearcher) SearchPage(_ context.Context, keyword string, opts packageinfo.SearchOptions) (packageinfo.SearchPage, error) {
+	f.called = true
+	f.keyword = keyword
+	f.opts = opts
+	f.pageOpts = append(f.pageOpts, opts)
+	if f.searchPage != nil {
+		return f.searchPage(keyword, opts)
+	}
+	if f.search != nil {
+		results, err := f.search(keyword, opts)
+		if err != nil {
+			return packageinfo.SearchPage{}, err
+		}
+		return packageinfo.SearchPage{Results: results}, nil
+	}
+	return packageinfo.SearchPage{Results: f.results}, nil
 }
 
 type fakeResolver struct {
@@ -263,6 +282,109 @@ func TestSearchUsesDefaultLimit(t *testing.T) {
 	}
 }
 
+func TestSearchPageFlagFetchesRequestedPage(t *testing.T) {
+	t.Parallel()
+
+	searcher := &fakeSearcher{
+		searchPage: func(_ string, opts packageinfo.SearchOptions) (packageinfo.SearchPage, error) {
+			if opts.PageToken == "" {
+				return packageinfo.SearchPage{
+					Results:       []packageinfo.PackageCandidate{{PackagePath: "example.com/page1", ModulePath: "example.com/page1"}},
+					NextPageToken: "page-2",
+				}, nil
+			}
+			if opts.PageToken != "page-2" {
+				t.Fatalf("PageToken = %q, want page-2", opts.PageToken)
+			}
+			return packageinfo.SearchPage{
+				Results: []packageinfo.PackageCandidate{{PackagePath: "github.com/air-verse/air", ModulePath: "github.com/air-verse/air"}},
+			}, nil
+		},
+	}
+	root := NewRootCommand(testApp(searcher, &fakeRunner{inside: true}))
+
+	stdout, _, err := executeCommand(root, "search", "air", "--page", "2", "--limit", "2")
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	if len(searcher.pageOpts) != 2 {
+		t.Fatalf("page calls = %d, want 2", len(searcher.pageOpts))
+	}
+	if searcher.pageOpts[0].PageToken != "" || searcher.pageOpts[1].PageToken != "page-2" {
+		t.Fatalf("page opts = %#v, want empty token then page-2", searcher.pageOpts)
+	}
+	if !strings.Contains(stdout, "github.com/air-verse/air") {
+		t.Fatalf("stdout = %q, want second page result", stdout)
+	}
+	if strings.Contains(stdout, "example.com/page1") {
+		t.Fatalf("stdout = %q, should only print requested page", stdout)
+	}
+}
+
+func TestSearchAllFetchesEveryPage(t *testing.T) {
+	t.Parallel()
+
+	searcher := &fakeSearcher{
+		searchPage: func(_ string, opts packageinfo.SearchOptions) (packageinfo.SearchPage, error) {
+			switch opts.PageToken {
+			case "":
+				return packageinfo.SearchPage{
+					Results:       []packageinfo.PackageCandidate{{PackagePath: "example.com/page1", ModulePath: "example.com/page1"}},
+					NextPageToken: "page-2",
+				}, nil
+			case "page-2":
+				return packageinfo.SearchPage{
+					Results:       []packageinfo.PackageCandidate{{PackagePath: "github.com/air-verse/air", ModulePath: "github.com/air-verse/air"}},
+					NextPageToken: "page-3",
+				}, nil
+			case "page-3":
+				return packageinfo.SearchPage{
+					Results: []packageinfo.PackageCandidate{{PackagePath: "example.com/page3", ModulePath: "example.com/page3"}},
+				}, nil
+			default:
+				t.Fatalf("unexpected page token %q", opts.PageToken)
+				return packageinfo.SearchPage{}, nil
+			}
+		},
+	}
+	root := NewRootCommand(testApp(searcher, &fakeRunner{inside: true}))
+
+	stdout, _, err := executeCommand(root, "search", "air", "--all", "--limit", "2")
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	for _, want := range []string{"example.com/page1", "github.com/air-verse/air", "example.com/page3"} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("stdout = %q, missing %q", stdout, want)
+		}
+	}
+	if strings.Contains(stdout, "More results available") {
+		t.Fatalf("stdout = %q, should not print next-page hint for --all", stdout)
+	}
+}
+
+func TestSearchPrintsNextPageHint(t *testing.T) {
+	t.Parallel()
+
+	searcher := &fakeSearcher{
+		searchPage: func(_ string, _ packageinfo.SearchOptions) (packageinfo.SearchPage, error) {
+			return packageinfo.SearchPage{
+				Results:       []packageinfo.PackageCandidate{{PackagePath: "example.com/page1", ModulePath: "example.com/page1"}},
+				NextPageToken: "page-2",
+			}, nil
+		},
+	}
+	root := NewRootCommand(testApp(searcher, &fakeRunner{inside: true}))
+
+	stdout, _, err := executeCommand(root, "search", "air", "--limit", "2")
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	if !strings.Contains(stdout, "More results available") || !strings.Contains(stdout, "gogetx search air --page 2 --limit 2") {
+		t.Fatalf("stdout = %q, want next page hint", stdout)
+	}
+}
+
 func TestAddDryRunDoesNotRunGoGet(t *testing.T) {
 	t.Parallel()
 
@@ -288,29 +410,29 @@ func TestAddDryRunDoesNotRunGoGet(t *testing.T) {
 func TestAddCanLoadMoreInteractiveResults(t *testing.T) {
 	t.Parallel()
 
-	var limits []int
+	var pageTokens []string
 	target := packageinfo.PackageCandidate{
 		PackagePath: "github.com/air-verse/air",
 		ModulePath:  "github.com/air-verse/air",
 	}
 	searcher := &fakeSearcher{
-		search: func(_ string, opts packageinfo.SearchOptions) ([]packageinfo.PackageCandidate, error) {
-			limits = append(limits, opts.Limit)
-			count := opts.Limit
-			if count > 36 {
-				count = 36
+		searchPage: func(_ string, opts packageinfo.SearchOptions) (packageinfo.SearchPage, error) {
+			pageTokens = append(pageTokens, opts.PageToken)
+			if opts.PageToken == "" {
+				return packageinfo.SearchPage{
+					Results: []packageinfo.PackageCandidate{
+						{PackagePath: "example.com/pkg1", ModulePath: "example.com/pkg1"},
+						{PackagePath: "example.com/pkg2", ModulePath: "example.com/pkg2"},
+					},
+					NextPageToken: "page-2",
+				}, nil
 			}
-			results := make([]packageinfo.PackageCandidate, 0, count)
-			for i := 0; i < count; i++ {
-				results = append(results, packageinfo.PackageCandidate{
-					PackagePath: fmt.Sprintf("example.com/pkg%d", i+1),
-					ModulePath:  fmt.Sprintf("example.com/pkg%d", i+1),
-				})
-			}
-			if opts.Limit >= 50 {
-				results[len(results)-1] = target
-			}
-			return results, nil
+			return packageinfo.SearchPage{
+				Results: []packageinfo.PackageCandidate{
+					{PackagePath: "example.com/pkg3", ModulePath: "example.com/pkg3"},
+					target,
+				},
+			}, nil
 		},
 	}
 	selector := &fakeSelector{
@@ -342,10 +464,10 @@ func TestAddCanLoadMoreInteractiveResults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute returned error: %v", err)
 	}
-	if len(limits) != 2 || limits[0] != packageinfo.DefaultSearchLimit || limits[1] != packageinfo.DefaultSearchLimit+searchLimitStep {
-		t.Fatalf("limits = %v, want [30 50]", limits)
+	if strings.Join(pageTokens, ",") != ",page-2" {
+		t.Fatalf("page tokens = %v, want first page then page-2", pageTokens)
 	}
-	if !strings.Contains(stdout, "Loading up to 50 results") {
+	if !strings.Contains(stdout, "Loading more results") {
 		t.Fatalf("stdout = %q, want load more message", stdout)
 	}
 	if !strings.Contains(stdout, "go get github.com/air-verse/air@latest") {

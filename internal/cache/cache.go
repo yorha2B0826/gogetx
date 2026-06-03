@@ -13,9 +13,11 @@ import (
 )
 
 type SearchCacheEntry struct {
-	Keyword   string                         `json:"keyword"`
-	Results   []packageinfo.PackageCandidate `json:"results"`
-	CreatedAt time.Time                      `json:"createdAt"`
+	Keyword       string                         `json:"keyword"`
+	Results       []packageinfo.PackageCandidate `json:"results"`
+	NextPageToken string                         `json:"nextPageToken,omitempty"`
+	Total         int                            `json:"total,omitempty"`
+	CreatedAt     time.Time                      `json:"createdAt"`
 }
 
 type Store struct {
@@ -33,29 +35,47 @@ func NewStore(path string, ttl time.Duration) *Store {
 }
 
 func (s *Store) Get(keyword string, opts packageinfo.SearchOptions) ([]packageinfo.PackageCandidate, bool, error) {
-	data, err := s.read()
+	page, ok, err := s.GetPage(keyword, opts)
 	if err != nil {
 		return nil, false, err
 	}
+	return page.Results, ok, nil
+}
+
+func (s *Store) GetPage(keyword string, opts packageinfo.SearchOptions) (packageinfo.SearchPage, bool, error) {
+	data, err := s.read()
+	if err != nil {
+		return packageinfo.SearchPage{}, false, err
+	}
 	entry, ok := data.Entries[cacheKey(keyword, opts)]
 	if !ok {
-		return nil, false, nil
+		return packageinfo.SearchPage{}, false, nil
 	}
 	if entry.CreatedAt.Add(s.ttl).Before(s.now()) {
-		return nil, false, nil
+		return packageinfo.SearchPage{}, false, nil
 	}
-	return entry.Results, true, nil
+	return packageinfo.SearchPage{
+		Results:       entry.Results,
+		NextPageToken: entry.NextPageToken,
+		Total:         entry.Total,
+	}, true, nil
 }
 
 func (s *Store) Set(keyword string, opts packageinfo.SearchOptions, results []packageinfo.PackageCandidate) error {
+	return s.SetPage(keyword, opts, packageinfo.SearchPage{Results: results})
+}
+
+func (s *Store) SetPage(keyword string, opts packageinfo.SearchOptions, page packageinfo.SearchPage) error {
 	data, err := s.read()
 	if err != nil {
 		return err
 	}
 	data.Entries[cacheKey(keyword, opts)] = SearchCacheEntry{
-		Keyword:   keyword,
-		Results:   results,
-		CreatedAt: s.now(),
+		Keyword:       keyword,
+		Results:       page.Results,
+		NextPageToken: page.NextPageToken,
+		Total:         page.Total,
+		CreatedAt:     s.now(),
 	}
 	return s.write(data)
 }
@@ -102,5 +122,5 @@ func (s *Store) write(data cacheFile) error {
 
 func cacheKey(keyword string, opts packageinfo.SearchOptions) string {
 	opts = packageinfo.NormalizeSearchOptions(opts)
-	return strings.ToLower(fmt.Sprintf("%s|%s|%d", opts.Source, strings.TrimSpace(keyword), opts.Limit))
+	return strings.ToLower(fmt.Sprintf("%s|%s|%d|%s", opts.Source, strings.TrimSpace(keyword), opts.Limit, opts.PageToken))
 }

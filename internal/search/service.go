@@ -12,6 +12,10 @@ type SourceSearcher interface {
 	Search(ctx context.Context, keyword string, opts packageinfo.SearchOptions) ([]packageinfo.PackageCandidate, error)
 }
 
+type SourcePageSearcher interface {
+	SearchPage(ctx context.Context, keyword string, opts packageinfo.SearchOptions) (packageinfo.SearchPage, error)
+}
+
 type Service struct {
 	Pkgsite SourceSearcher
 	GitHub  SourceSearcher
@@ -19,50 +23,70 @@ type Service struct {
 }
 
 func (s *Service) Search(ctx context.Context, keyword string, opts packageinfo.SearchOptions) ([]packageinfo.PackageCandidate, error) {
-	opts = packageinfo.NormalizeSearchOptions(opts)
-	if !opts.NoCache && !opts.Refresh && s.Cache != nil {
-		if results, ok, err := s.Cache.Get(keyword, opts); err != nil {
-			return nil, err
-		} else if ok {
-			return results, nil
-		}
-	}
-
-	results, err := s.searchFresh(ctx, keyword, opts)
+	page, err := s.SearchPage(ctx, keyword, opts)
 	if err != nil {
 		return nil, err
 	}
-	if !opts.NoCache && s.Cache != nil {
-		if err := s.Cache.Set(keyword, opts, results); err != nil {
-			return nil, err
+	return page.Results, nil
+}
+
+func (s *Service) SearchPage(ctx context.Context, keyword string, opts packageinfo.SearchOptions) (packageinfo.SearchPage, error) {
+	opts = packageinfo.NormalizeSearchOptions(opts)
+	if !opts.NoCache && !opts.Refresh && s.Cache != nil {
+		if page, ok, err := s.Cache.GetPage(keyword, opts); err != nil {
+			return packageinfo.SearchPage{}, err
+		} else if ok {
+			return page, nil
 		}
 	}
-	return results, nil
+
+	page, err := s.searchFreshPage(ctx, keyword, opts)
+	if err != nil {
+		return packageinfo.SearchPage{}, err
+	}
+	if !opts.NoCache && s.Cache != nil {
+		if err := s.Cache.SetPage(keyword, opts, page); err != nil {
+			return packageinfo.SearchPage{}, err
+		}
+	}
+	return page, nil
 }
 
 func (s *Service) searchFresh(ctx context.Context, keyword string, opts packageinfo.SearchOptions) ([]packageinfo.PackageCandidate, error) {
+	page, err := s.searchFreshPage(ctx, keyword, opts)
+	if err != nil {
+		return nil, err
+	}
+	return page.Results, nil
+}
+
+func (s *Service) searchFreshPage(ctx context.Context, keyword string, opts packageinfo.SearchOptions) (packageinfo.SearchPage, error) {
 	switch opts.Source {
 	case packageinfo.SourcePkgsite:
 		if s.Pkgsite == nil {
-			return nil, fmt.Errorf("pkgsite searcher is not configured")
+			return packageinfo.SearchPage{}, fmt.Errorf("pkgsite searcher is not configured")
 		}
-		return s.Pkgsite.Search(ctx, keyword, opts)
+		return searchPage(ctx, s.Pkgsite, keyword, opts)
 	case packageinfo.SourceGitHub:
 		if s.GitHub == nil {
-			return nil, fmt.Errorf("github searcher is not configured")
+			return packageinfo.SearchPage{}, fmt.Errorf("github searcher is not configured")
 		}
-		return s.GitHub.Search(ctx, keyword, opts)
+		return searchPage(ctx, s.GitHub, keyword, opts)
 	case packageinfo.SourceAll:
 		var combined []packageinfo.PackageCandidate
 		var firstErr error
+		var nextPageToken string
+		var total int
 		if s.Pkgsite != nil {
-			results, err := s.Pkgsite.Search(ctx, keyword, opts)
+			page, err := searchPage(ctx, s.Pkgsite, keyword, opts)
 			if err != nil && firstErr == nil {
 				firstErr = err
 			}
-			combined = append(combined, results...)
+			combined = append(combined, page.Results...)
+			nextPageToken = page.NextPageToken
+			total += page.Total
 		}
-		if s.GitHub != nil {
+		if opts.PageToken == "" && s.GitHub != nil {
 			results, err := s.GitHub.Search(ctx, keyword, opts)
 			if err != nil && firstErr == nil {
 				firstErr = err
@@ -70,12 +94,27 @@ func (s *Service) searchFresh(ctx context.Context, keyword string, opts packagei
 			combined = append(combined, results...)
 		}
 		if len(combined) == 0 && firstErr != nil {
-			return nil, firstErr
+			return packageinfo.SearchPage{}, firstErr
 		}
-		return dedupe(combined), nil
+		return packageinfo.SearchPage{
+			Results:       dedupe(combined),
+			NextPageToken: nextPageToken,
+			Total:         total,
+		}, nil
 	default:
-		return nil, fmt.Errorf("unsupported source %q", opts.Source)
+		return packageinfo.SearchPage{}, fmt.Errorf("unsupported source %q", opts.Source)
 	}
+}
+
+func searchPage(ctx context.Context, searcher SourceSearcher, keyword string, opts packageinfo.SearchOptions) (packageinfo.SearchPage, error) {
+	if paged, ok := searcher.(SourcePageSearcher); ok {
+		return paged.SearchPage(ctx, keyword, opts)
+	}
+	results, err := searcher.Search(ctx, keyword, opts)
+	if err != nil {
+		return packageinfo.SearchPage{}, err
+	}
+	return packageinfo.SearchPage{Results: results}, nil
 }
 
 func dedupe(results []packageinfo.PackageCandidate) []packageinfo.PackageCandidate {

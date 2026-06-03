@@ -27,6 +27,10 @@ type Searcher interface {
 	Search(ctx context.Context, keyword string, opts packageinfo.SearchOptions) ([]packageinfo.PackageCandidate, error)
 }
 
+type PagedSearcher interface {
+	SearchPage(ctx context.Context, keyword string, opts packageinfo.SearchOptions) (packageinfo.SearchPage, error)
+}
+
 type Resolver interface {
 	Resolve(ctx context.Context, candidate packageinfo.PackageCandidate) (string, error)
 }

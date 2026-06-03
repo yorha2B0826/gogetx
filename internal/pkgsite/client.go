@@ -49,36 +49,47 @@ func NewClient(opts ...Option) *Client {
 }
 
 func (c *Client) Search(ctx context.Context, keyword string, opts packageinfo.SearchOptions) ([]packageinfo.PackageCandidate, error) {
+	page, err := c.SearchPage(ctx, keyword, opts)
+	if err != nil {
+		return nil, err
+	}
+	return page.Results, nil
+}
+
+func (c *Client) SearchPage(ctx context.Context, keyword string, opts packageinfo.SearchOptions) (packageinfo.SearchPage, error) {
 	keyword = strings.TrimSpace(keyword)
 	if keyword == "" {
-		return nil, fmt.Errorf("search keyword is required")
+		return packageinfo.SearchPage{}, fmt.Errorf("search keyword is required")
 	}
 	opts = packageinfo.NormalizeSearchOptions(opts)
 
 	endpoint, err := url.Parse(c.baseURL + "/v1beta/search")
 	if err != nil {
-		return nil, err
+		return packageinfo.SearchPage{}, err
 	}
 	query := endpoint.Query()
 	query.Set("q", keyword)
 	query.Set("limit", fmt.Sprintf("%d", opts.Limit))
+	if opts.PageToken != "" {
+		query.Set("token", opts.PageToken)
+	}
 	endpoint.RawQuery = query.Encode()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint.String(), nil)
 	if err != nil {
-		return nil, err
+		return packageinfo.SearchPage{}, err
 	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", "gogetx")
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return nil, err
+		return packageinfo.SearchPage{}, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return nil, fmt.Errorf("pkg.go.dev search failed: %s", resp.Status)
+		return packageinfo.SearchPage{}, fmt.Errorf("pkg.go.dev search failed: %s", resp.Status)
 	}
 
 	var payload struct {
@@ -88,9 +99,11 @@ func (c *Client) Search(ctx context.Context, keyword string, opts packageinfo.Se
 			Version     string `json:"version"`
 			Synopsis    string `json:"synopsis"`
 		} `json:"items"`
+		NextPageToken string `json:"nextPageToken"`
+		Total         int    `json:"total"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		return nil, fmt.Errorf("decode pkg.go.dev search response: %w", err)
+		return packageinfo.SearchPage{}, fmt.Errorf("decode pkg.go.dev search response: %w", err)
 	}
 
 	results := make([]packageinfo.PackageCandidate, 0, len(payload.Items))
@@ -103,5 +116,9 @@ func (c *Client) Search(ctx context.Context, keyword string, opts packageinfo.Se
 			Source:      packageinfo.SourcePkgsite,
 		})
 	}
-	return results, nil
+	return packageinfo.SearchPage{
+		Results:       results,
+		NextPageToken: payload.NextPageToken,
+		Total:         payload.Total,
+	}, nil
 }

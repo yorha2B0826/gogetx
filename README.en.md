@@ -17,7 +17,7 @@ Go 1.23 or newer is required.
 Recommended fixed version:
 
 ```bash
-go install github.com/yorha2B0826/gogetx@v0.1.6
+go install github.com/yorha2B0826/gogetx@v0.1.7
 ```
 
 Latest version:
@@ -68,6 +68,8 @@ Examples:
 gogetx search zap
 gogetx search logger --json
 gogetx search echo --source all --limit 5
+gogetx search air --limit 10 --page 3
+gogetx search air --all --limit 30
 gogetx add zap
 gogetx add echo --dry-run --first --yes
 gogetx add grpc --version latest --first --yes
@@ -92,7 +94,7 @@ go mod init example.com/myapp
 - `--yes`: skip the final confirmation; it does not choose a search result.
 - `--first`: choose the first search result without interactive selection.
 - Use `--first --yes` for scripts or non-interactive environments.
-- The default search size is 30 results; when the interactive selector shows `Load more results`, choose it to expand the candidate list.
+- The default page size is 30 results; when the interactive selector shows `Load more results`, choose it to load the next page of candidates.
 - By default, `gogetx add` does not run `go mod tidy`, so newly added packages remain in `go.mod` / `go.sum` before you import them.
 - `--tidy`: additionally run `go mod tidy` after `go get`. If your source code does not import the package yet, Go may remove the newly added dependency.
 - `--dry-run` only prints commands and never runs `go get` or `go mod tidy`.
@@ -116,7 +118,19 @@ The interactive selection list renders each candidate as a single truncated line
 
 ## Search Sources
 
-The default source is `pkgsite`, backed by pkg.go.dev's `/v1beta/search` JSON API. `--limit` controls the initial number of search results and defaults to 30.
+The default source is `pkgsite`, backed by pkg.go.dev's `/v1beta/search` JSON API. `--limit` controls the number of results per page and defaults to 30.
+
+Paginated search:
+
+```bash
+gogetx search air --limit 10 --page 1
+gogetx search air --limit 10 --page 2
+gogetx search air --all --limit 30
+```
+
+- `--page N`: show page N. pkg.go.dev uses token pagination, so `gogetx` fetches prior page tokens before printing the requested page.
+- `--all`: keep fetching available pages and print them together. Broad keywords may require multiple network requests.
+- When `--all` is not used and another page exists, the output includes a next-page command hint.
 
 Available sources:
 

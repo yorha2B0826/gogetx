@@ -17,10 +17,17 @@ type PackageCandidate struct {
 }
 
 type SearchOptions struct {
-	Limit   int
-	Source  string
-	NoCache bool
-	Refresh bool
+	Limit     int
+	Source    string
+	PageToken string
+	NoCache   bool
+	Refresh   bool
+}
+
+type SearchPage struct {
+	Results       []PackageCandidate `json:"results"`
+	NextPageToken string             `json:"nextPageToken,omitempty"`
+	Total         int                `json:"total,omitempty"`
 }
 
 func NormalizeSearchOptions(opts SearchOptions) SearchOptions {

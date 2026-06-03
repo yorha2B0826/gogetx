@@ -91,6 +91,7 @@ func newAddCommand(app *App) *cobra.Command {
 	var yes bool
 	var dryRun bool
 	var first bool
+	var allPages bool
 
 	command := &cobra.Command{
 		Use:   "add <keyword>",
@@ -105,7 +106,7 @@ func newAddCommand(app *App) *cobra.Command {
 				return fmt.Errorf("current directory is not inside a Go module; run `go mod init <module>` first")
 			}
 
-			selected, err := selectCandidate(cmd, app, args[0], opts, first)
+			selected, err := selectCandidate(cmd, app, args[0], opts, first, allPages)
 			if err != nil {
 				return err
 			}
@@ -146,6 +147,7 @@ func newAddCommand(app *App) *cobra.Command {
 	command.Flags().BoolVar(&tidy, "tidy", false, "run go mod tidy after go get")
 	command.Flags().BoolVar(&yes, "yes", false, "skip confirmation before running go get")
 	command.Flags().BoolVar(&first, "first", false, "select the first search result without prompting")
+	command.Flags().BoolVar(&allPages, "all", false, "fetch all available search result pages before interactive selection")
 	command.Flags().BoolVar(&dryRun, "dry-run", false, "print commands without executing them")
 	return command
 }
@@ -375,7 +377,7 @@ func searchPage(cmd *cobra.Command, searcher Searcher, keyword string, opts pack
 	return packageinfo.SearchPage{Results: results}, nil
 }
 
-func selectCandidate(cmd *cobra.Command, app *App, keyword string, opts packageinfo.SearchOptions, first bool) (packageinfo.PackageCandidate, error) {
+func selectCandidate(cmd *cobra.Command, app *App, keyword string, opts packageinfo.SearchOptions, first bool, allPages bool) (packageinfo.PackageCandidate, error) {
 	if modulePath, ok, err := app.Favorites.Favorite(keyword); err != nil {
 		return packageinfo.PackageCandidate{}, err
 	} else if ok {
@@ -385,6 +387,22 @@ func selectCandidate(cmd *cobra.Command, app *App, keyword string, opts packagei
 			ModulePath:  modulePath,
 			Source:      "favorite",
 		}, nil
+	}
+
+	if allPages && !first {
+		page, err := collectSearchPages(cmd, app.Searcher, keyword, opts)
+		if err != nil {
+			return packageinfo.PackageCandidate{}, err
+		}
+		if len(page.Results) == 0 {
+			return packageinfo.PackageCandidate{}, fmt.Errorf("no results found for %q", keyword)
+		}
+		if len(page.Results) == 1 {
+			fmt.Fprintf(cmd.OutOrStdout(), "Selected: %s\n", page.Results[0].PackagePath)
+			return page.Results[0], nil
+		}
+		fmt.Fprintf(cmd.OutOrStdout(), "Loaded %d results.\n", len(page.Results))
+		return app.Selector.Select(page.Results)
 	}
 
 	opts.PageToken = ""

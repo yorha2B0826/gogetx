@@ -30,6 +30,12 @@ func (PromptUI) Select(results []packageinfo.PackageCandidate) (packageinfo.Pack
 			Display:   candidateDisplayLine(result, width),
 		})
 	}
+	searcher := func(input string, index int) bool {
+		if index < 0 || index >= len(items) {
+			return false
+		}
+		return candidateMatchesSearch(input, items[index].Candidate)
+	}
 	templates := &promptui.SelectTemplates{
 		Label:    "{{ . }}",
 		Active:   "> {{ .Display | cyan }}",
@@ -37,10 +43,12 @@ func (PromptUI) Select(results []packageinfo.PackageCandidate) (packageinfo.Pack
 		Selected: "{{ .Candidate.PackagePath | green }}",
 	}
 	prompt := promptui.Select{
-		Label:     "Select package",
-		Items:     items,
-		Templates: templates,
-		Size:      10,
+		Label:             "Select package",
+		Items:             items,
+		Templates:         templates,
+		Size:              selectDisplaySize(len(items)),
+		Searcher:          searcher,
+		StartInSearchMode: true,
 	}
 	index, _, err := prompt.Run()
 	if err != nil {
@@ -89,6 +97,26 @@ func selectDisplayWidth() int {
 	return width
 }
 
+func selectDisplaySize(itemCount int) int {
+	if itemCount < 1 {
+		return 1
+	}
+	size := 15
+	if lines, err := strconv.Atoi(os.Getenv("LINES")); err == nil && lines > 0 {
+		size = lines - 8
+	}
+	if size < 10 {
+		size = 10
+	}
+	if size > 25 {
+		size = 25
+	}
+	if itemCount < size {
+		return itemCount
+	}
+	return size
+}
+
 func candidateDisplayLine(candidate packageinfo.PackageCandidate, maxRunes int) string {
 	path := strings.TrimSpace(candidate.PackagePath)
 	synopsis := strings.Join(strings.Fields(candidate.Synopsis), " ")
@@ -108,4 +136,44 @@ func truncateRunes(s string, maxRunes int) string {
 	}
 	runes := []rune(s)
 	return string(runes[:maxRunes-3]) + "..."
+}
+
+func candidateMatchesSearch(input string, candidate packageinfo.PackageCandidate) bool {
+	needle := normalizeSearchText(input)
+	if needle == "" {
+		return true
+	}
+	haystack := normalizeSearchText(strings.Join([]string{
+		candidate.PackagePath,
+		candidate.ModulePath,
+		candidate.Synopsis,
+		candidate.Source,
+	}, " "))
+	return strings.Contains(haystack, needle) || fuzzySubsequence(needle, haystack)
+}
+
+func normalizeSearchText(s string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(s) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+func fuzzySubsequence(needle string, haystack string) bool {
+	if needle == "" {
+		return true
+	}
+	i := 0
+	for _, r := range haystack {
+		if rune(needle[i]) == r {
+			i++
+			if i == len(needle) {
+				return true
+			}
+		}
+	}
+	return false
 }

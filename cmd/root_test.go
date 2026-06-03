@@ -475,6 +475,72 @@ func TestAddCanLoadMoreInteractiveResults(t *testing.T) {
 	}
 }
 
+func TestAddAllPrefetchesAllPagesBeforeSelecting(t *testing.T) {
+	t.Parallel()
+
+	target := packageinfo.PackageCandidate{
+		PackagePath: "github.com/air-verse/air",
+		ModulePath:  "github.com/air-verse/air",
+	}
+	searcher := &fakeSearcher{
+		searchPage: func(_ string, opts packageinfo.SearchOptions) (packageinfo.SearchPage, error) {
+			switch opts.PageToken {
+			case "":
+				return packageinfo.SearchPage{
+					Results: []packageinfo.PackageCandidate{
+						{PackagePath: "example.com/pkg1", ModulePath: "example.com/pkg1"},
+					},
+					NextPageToken: "page-2",
+				}, nil
+			case "page-2":
+				return packageinfo.SearchPage{
+					Results: []packageinfo.PackageCandidate{
+						target,
+					},
+				}, nil
+			default:
+				t.Fatalf("unexpected page token %q", opts.PageToken)
+				return packageinfo.SearchPage{}, nil
+			}
+		},
+	}
+	selector := &fakeSelector{
+		selectFunc: func(results []packageinfo.PackageCandidate) (packageinfo.PackageCandidate, error) {
+			for _, result := range results {
+				if isLoadMoreCandidate(result) {
+					return packageinfo.PackageCandidate{}, errors.New("load more candidate should not be shown after --all")
+				}
+			}
+			for _, result := range results {
+				if result.PackagePath == target.PackagePath {
+					return result, nil
+				}
+			}
+			return packageinfo.PackageCandidate{}, errors.New("target result not found")
+		},
+	}
+	root := NewRootCommand(&App{
+		Searcher:  searcher,
+		Resolver:  &fakeResolver{modulePath: target.ModulePath},
+		Runner:    &fakeRunner{inside: true},
+		Favorites: fakeFavorites{values: map[string]string{}},
+		Selector:  selector,
+		Latest:    &fakeLatest{},
+		Opener:    &fakeOpener{},
+	})
+
+	stdout, _, err := executeCommand(root, "add", "air", "--dry-run", "--yes", "--all", "--no-cache")
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	if len(searcher.pageOpts) != 2 || searcher.pageOpts[0].PageToken != "" || searcher.pageOpts[1].PageToken != "page-2" {
+		t.Fatalf("page opts = %#v, want first page then page-2", searcher.pageOpts)
+	}
+	if !strings.Contains(stdout, "go get github.com/air-verse/air@latest") {
+		t.Fatalf("stdout = %q, want selected air command", stdout)
+	}
+}
+
 func TestAddSearchFlagsArePassedToSearcher(t *testing.T) {
 	t.Parallel()
 

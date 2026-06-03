@@ -55,3 +55,22 @@ func TestCandidateDisplayLineNormalizesWhitespace(t *testing.T) {
 		t.Fatalf("line = %q, want normalized single line", line)
 	}
 }
+
+func TestCandidateMatchesSearchUsesPathModuleAndSynopsis(t *testing.T) {
+	t.Parallel()
+
+	candidate := packageinfo.PackageCandidate{
+		PackagePath: "github.com/air-verse/air",
+		ModulePath:  "github.com/air-verse/air",
+		Synopsis:    "Live reload for Go apps",
+	}
+
+	for _, input := range []string{"airverse", "ghair", "live reload"} {
+		if !candidateMatchesSearch(input, candidate) {
+			t.Fatalf("candidateMatchesSearch(%q) = false, want true", input)
+		}
+	}
+	if candidateMatchesSearch("zaplogger", candidate) {
+		t.Fatal("candidateMatchesSearch(zaplogger) = true, want false")
+	}
+}

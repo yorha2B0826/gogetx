@@ -17,7 +17,7 @@ Go 1.23 or newer is required.
 Recommended fixed version:
 
 ```bash
-go install github.com/yorha2B0826/gogetx@v0.1.7
+go install github.com/yorha2B0826/gogetx@v0.1.8
 ```
 
 Latest version:
@@ -72,6 +72,7 @@ gogetx search air --limit 10 --page 3
 gogetx search air --all --limit 30
 gogetx add zap
 gogetx add echo --dry-run --first --yes
+gogetx add air --all
 gogetx add grpc --version latest --first --yes
 gogetx versions go.uber.org/zap
 gogetx versions google.golang.org/grpc/status
@@ -95,6 +96,7 @@ go mod init example.com/myapp
 - `--first`: choose the first search result without interactive selection.
 - Use `--first --yes` for scripts or non-interactive environments.
 - The default page size is 30 results; when the interactive selector shows `Load more results`, choose it to load the next page of candidates.
+- `--all`: fetch all available search pages before opening interactive selection. This is useful when you want the full result set first and then filter locally. Broad keywords may require multiple network requests.
 - By default, `gogetx add` does not run `go mod tidy`, so newly added packages remain in `go.mod` / `go.sum` before you import them.
 - `--tidy`: additionally run `go mod tidy` after `go get`. If your source code does not import the package yet, Go may remove the newly added dependency.
 - `--dry-run` only prints commands and never runs `go get` or `go mod tidy`.
@@ -114,7 +116,7 @@ Resolved module: go.uber.org/zap
 Command: go get go.uber.org/zap@latest
 ```
 
-The interactive selection list renders each candidate as a single truncated line. This avoids redraw drift when long package descriptions would otherwise wrap in the terminal.
+The interactive selection list renders each candidate as a single truncated line. This avoids redraw drift when long package descriptions would otherwise wrap in the terminal. The selector supports fzf-like filtering inside the current result set: type to filter by package path, module path, or synopsis; use the arrow keys to move and Enter to select.
 
 ## Search Sources
 

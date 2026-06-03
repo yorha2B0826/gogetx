@@ -17,7 +17,7 @@
 推荐安装固定版本：
 
 ```bash
-go install github.com/yorha2B0826/gogetx@v0.1.7
+go install github.com/yorha2B0826/gogetx@v0.1.8
 ```
 
 也可以安装最新版本：
@@ -72,6 +72,7 @@ gogetx search air --limit 10 --page 3
 gogetx search air --all --limit 30
 gogetx add zap
 gogetx add echo --dry-run --first --yes
+gogetx add air --all
 gogetx add grpc --version latest --first --yes
 gogetx versions go.uber.org/zap
 gogetx versions google.golang.org/grpc/status
@@ -95,6 +96,7 @@ go mod init example.com/myapp
 - `--first`：明确选择第一条搜索结果，不进入交互选择。
 - 脚本或非交互环境建议同时使用 `--first --yes`。
 - 默认每页搜索 30 条结果；交互选择列表末尾出现 `Load more results` 时，选择它会继续加载下一页候选。
+- `--all`：在进入交互选择前拉取所有可用搜索页，适合想一次看完整结果集再筛选的情况。关键词很宽泛时会进行多次网络请求。
 - 默认不运行 `go mod tidy`，确保刚添加但尚未 import 的依赖会保留在 `go.mod` / `go.sum` 中。
 - `--tidy`：在 `go get` 后额外运行 `go mod tidy`。如果项目源码还没有 import 该包，Go 可能会把刚添加的依赖移除。
 - `--dry-run` 只打印命令，不执行 `go get` 或 `go mod tidy`。
@@ -114,7 +116,7 @@ Resolved module: go.uber.org/zap
 Command: go get go.uber.org/zap@latest
 ```
 
-交互选择列表会把每个候选项压缩为单行显示，避免过长简介在终端里换行后造成选项重绘偏移。
+交互选择列表会把每个候选项压缩为单行显示，避免过长简介在终端里换行后造成选项重绘偏移。选择器支持类似 fzf 的结果集内过滤：进入选择器后直接输入关键词即可筛选，匹配范围包括 package path、module path 和 synopsis；按方向键移动，按 Enter 选择。
 
 ## 搜索来源
 

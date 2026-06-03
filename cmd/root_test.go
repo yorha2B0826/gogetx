@@ -476,6 +476,30 @@ func TestVersionsReturnsErrorWhenNoVersionsFound(t *testing.T) {
 	}
 }
 
+func TestVersionsRequiresModuleOrPackageArgument(t *testing.T) {
+	t.Parallel()
+
+	root := NewRootCommand(testApp(&fakeSearcher{}, &fakeRunner{inside: true}))
+
+	_, _, err := executeCommand(root, "versions")
+	if err == nil {
+		t.Fatal("Execute returned nil error, want helpful missing argument error")
+	}
+	for _, want := range []string{
+		"missing module or package path",
+		"gogetx versions <module-or-package>",
+		"gogetx versions go.uber.org/zap",
+		"gogetx versions google.golang.org/grpc/status",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error = %q, missing %q", err.Error(), want)
+		}
+	}
+	if strings.Contains(err.Error(), "accepts 1 arg") {
+		t.Fatalf("error = %q, should not expose generic Cobra arg message", err.Error())
+	}
+}
+
 func TestLatestResolvesPackagePathBeforeLookup(t *testing.T) {
 	t.Parallel()
 
@@ -503,6 +527,27 @@ func TestLatestResolvesPackagePathBeforeLookup(t *testing.T) {
 	}
 	if !strings.Contains(stdout, "v1.28.0") {
 		t.Fatalf("stdout = %q, want latest version", stdout)
+	}
+}
+
+func TestLatestRequiresModuleOrPackageArgument(t *testing.T) {
+	t.Parallel()
+
+	root := NewRootCommand(testApp(&fakeSearcher{}, &fakeRunner{inside: true}))
+
+	_, _, err := executeCommand(root, "latest")
+	if err == nil {
+		t.Fatal("Execute returned nil error, want helpful missing argument error")
+	}
+	for _, want := range []string{
+		"missing module or package path",
+		"gogetx latest <module-or-package>",
+		"gogetx latest go.uber.org/zap",
+		"gogetx latest google.golang.org/grpc/status",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error = %q, missing %q", err.Error(), want)
+		}
 	}
 }
 

@@ -17,7 +17,7 @@ Go 1.23 or newer is required.
 Recommended fixed version:
 
 ```bash
-go install github.com/yorha2B0826/gogetx@v0.1.4
+go install github.com/yorha2B0826/gogetx@v0.1.5
 ```
 
 Latest version:

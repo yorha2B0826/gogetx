@@ -136,7 +136,7 @@ func newVersionsCommand(app *App) *cobra.Command {
 	return &cobra.Command{
 		Use:   "versions <module-or-package>",
 		Short: "List available module versions",
-		Args:  cobra.ExactArgs(1),
+		Args:  moduleOrPackageArg("versions"),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			modulePath, err := resolveModulePath(cmd, app, args[0])
 			if err != nil {
@@ -161,7 +161,7 @@ func newLatestCommand(app *App) *cobra.Command {
 	return &cobra.Command{
 		Use:   "latest <module-or-package>",
 		Short: "Show the latest module version from the Go proxy",
-		Args:  cobra.ExactArgs(1),
+		Args:  moduleOrPackageArg("latest"),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			modulePath, err := resolveModulePath(cmd, app, args[0])
 			if err != nil {
@@ -178,6 +178,25 @@ func newLatestCommand(app *App) *cobra.Command {
 			fmt.Fprintf(cmd.OutOrStdout(), "%s %s\n", info.Version, info.Time.Format("2006-01-02T15:04:05Z07:00"))
 			return nil
 		},
+	}
+}
+
+func moduleOrPackageArg(commandName string) cobra.PositionalArgs {
+	return func(_ *cobra.Command, args []string) error {
+		if len(args) == 1 {
+			return nil
+		}
+		if len(args) == 0 {
+			return fmt.Errorf(`missing module or package path
+
+Usage:
+  gogetx %s <module-or-package>
+
+Examples:
+  gogetx %s go.uber.org/zap
+  gogetx %s google.golang.org/grpc/status`, commandName, commandName, commandName)
+		}
+		return fmt.Errorf("expected one module or package path, received %d", len(args))
 	}
 }
 

@@ -17,7 +17,7 @@
 推荐安装固定版本：
 
 ```bash
-go install github.com/yorha2B0826/gogetx@v0.1.4
+go install github.com/yorha2B0826/gogetx@v0.1.5
 ```
 
 也可以安装最新版本：

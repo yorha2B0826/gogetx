@@ -183,6 +183,37 @@ func TestSearchJSON(t *testing.T) {
 	}
 }
 
+func TestVersionCommand(t *testing.T) {
+	t.Parallel()
+
+	root := NewRootCommand(testApp(&fakeSearcher{}, &fakeRunner{inside: true}))
+
+	stdout, _, err := executeCommand(root, "version")
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	if !strings.HasPrefix(stdout, "gogetx ") {
+		t.Fatalf("stdout = %q, want gogetx version output", stdout)
+	}
+	if !strings.HasSuffix(stdout, "\n") {
+		t.Fatalf("stdout = %q, want trailing newline", stdout)
+	}
+}
+
+func TestRootVersionFlag(t *testing.T) {
+	t.Parallel()
+
+	root := NewRootCommand(testApp(&fakeSearcher{}, &fakeRunner{inside: true}))
+
+	stdout, _, err := executeCommand(root, "--version")
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	if !strings.HasPrefix(stdout, "gogetx ") {
+		t.Fatalf("stdout = %q, want gogetx version output", stdout)
+	}
+}
+
 func TestSearchFlagsArePassedToSearcher(t *testing.T) {
 	t.Parallel()
 

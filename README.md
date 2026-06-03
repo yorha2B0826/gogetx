@@ -17,7 +17,7 @@
 推荐安装固定版本：
 
 ```bash
-go install github.com/yorha2B0826/gogetx@v0.1.3
+go install github.com/yorha2B0826/gogetx@v0.1.4
 ```
 
 也可以安装最新版本：
@@ -55,6 +55,7 @@ gogetx search <keyword>
 gogetx add <keyword>
 gogetx versions <module-or-package>
 gogetx latest <module-or-package>
+gogetx version
 gogetx doc <target>
 gogetx fav
 gogetx addfav <alias> <module>
@@ -74,6 +75,7 @@ gogetx versions go.uber.org/zap
 gogetx versions google.golang.org/grpc/status
 gogetx latest go.uber.org/zap
 gogetx latest google.golang.org/grpc/status
+gogetx version
 gogetx doc go.uber.org/zap
 ```
 

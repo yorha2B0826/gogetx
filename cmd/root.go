@@ -17,17 +17,21 @@ func NewRootCommand(app *App) *Command {
 		app = NewDefaultApp()
 	}
 
+	version := currentVersion()
 	root := &cobra.Command{
 		Use:           "gogetx",
 		Short:         "Search and install Go modules from the terminal",
+		Version:       version,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
+	root.SetVersionTemplate("gogetx {{.Version}}\n")
 	root.CompletionOptions.DisableDefaultCmd = true
 	root.AddCommand(newSearchCommand(app))
 	root.AddCommand(newAddCommand(app))
 	root.AddCommand(newVersionsCommand(app))
 	root.AddCommand(newLatestCommand(app))
+	root.AddCommand(newVersionCommand(version))
 	root.AddCommand(newDocCommand(app))
 	root.AddCommand(newFavCommand(app))
 	root.AddCommand(newAddFavCommand(app))
@@ -130,7 +134,7 @@ func newAddCommand(app *App) *cobra.Command {
 
 func newVersionsCommand(app *App) *cobra.Command {
 	return &cobra.Command{
-		Use:   "versions <module>",
+		Use:   "versions <module-or-package>",
 		Short: "List available module versions",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -155,7 +159,7 @@ func newVersionsCommand(app *App) *cobra.Command {
 
 func newLatestCommand(app *App) *cobra.Command {
 	return &cobra.Command{
-		Use:   "latest <module>",
+		Use:   "latest <module-or-package>",
 		Short: "Show the latest module version from the Go proxy",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {

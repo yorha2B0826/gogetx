@@ -103,7 +103,7 @@ func (r *GoRunner) ListVersions(ctx context.Context, modulePath string) ([]strin
 	}
 	fields := strings.Fields(output)
 	if len(fields) <= 1 {
-		return nil, nil
+		return nil, fmt.Errorf("no versions found for module %q", modulePath)
 	}
 	return fields[1:], nil
 }

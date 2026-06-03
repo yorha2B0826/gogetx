@@ -15,18 +15,26 @@ import (
 type fakeSearcher struct {
 	results []packageinfo.PackageCandidate
 	called  bool
+	keyword string
+	opts    packageinfo.SearchOptions
 }
 
-func (f *fakeSearcher) Search(_ context.Context, _ string, _ packageinfo.SearchOptions) ([]packageinfo.PackageCandidate, error) {
+func (f *fakeSearcher) Search(_ context.Context, keyword string, opts packageinfo.SearchOptions) ([]packageinfo.PackageCandidate, error) {
 	f.called = true
+	f.keyword = keyword
+	f.opts = opts
 	return f.results, nil
 }
 
 type fakeResolver struct {
-	modulePath string
+	modulePath    string
+	called        bool
+	lastCandidate packageinfo.PackageCandidate
 }
 
-func (f fakeResolver) Resolve(_ context.Context, _ packageinfo.PackageCandidate) (string, error) {
+func (f *fakeResolver) Resolve(_ context.Context, candidate packageinfo.PackageCandidate) (string, error) {
+	f.called = true
+	f.lastCandidate = candidate
 	return f.modulePath, nil
 }
 
@@ -35,10 +43,15 @@ type fakeRunner struct {
 	getCalled    bool
 	tidyCalled   bool
 	listVersions []string
+	getModule    string
+	getVersion   string
+	listModule   string
 }
 
-func (f *fakeRunner) Get(_ context.Context, _, _ string) error {
+func (f *fakeRunner) Get(_ context.Context, modulePath, version string) error {
 	f.getCalled = true
+	f.getModule = modulePath
+	f.getVersion = version
 	return nil
 }
 
@@ -47,7 +60,8 @@ func (f *fakeRunner) ModTidy(_ context.Context) error {
 	return nil
 }
 
-func (f *fakeRunner) ListVersions(_ context.Context, _ string) ([]string, error) {
+func (f *fakeRunner) ListVersions(_ context.Context, modulePath string) ([]string, error) {
+	f.listModule = modulePath
 	return f.listVersions, nil
 }
 
@@ -99,9 +113,12 @@ func (f *fakeSelector) Confirm(message string) (bool, error) {
 	return true, nil
 }
 
-type fakeLatest struct{}
+type fakeLatest struct {
+	module string
+}
 
-func (fakeLatest) Latest(_ context.Context, _ string) (goproxy.VersionInfo, error) {
+func (f *fakeLatest) Latest(_ context.Context, modulePath string) (goproxy.VersionInfo, error) {
+	f.module = modulePath
 	return goproxy.VersionInfo{Version: "v1.28.0"}, nil
 }
 
@@ -129,13 +146,14 @@ func testApp(searcher *fakeSearcher, runner *fakeRunner) *App {
 }
 
 func testAppWithSelector(searcher *fakeSearcher, runner *fakeRunner, selector *fakeSelector) *App {
+	resolver := &fakeResolver{modulePath: "go.uber.org/zap"}
 	return &App{
 		Searcher:  searcher,
-		Resolver:  fakeResolver{modulePath: "go.uber.org/zap"},
+		Resolver:  resolver,
 		Runner:    runner,
 		Favorites: fakeFavorites{values: map[string]string{}},
 		Selector:  selector,
-		Latest:    fakeLatest{},
+		Latest:    &fakeLatest{},
 		Opener:    &fakeOpener{},
 	}
 }
@@ -165,6 +183,28 @@ func TestSearchJSON(t *testing.T) {
 	}
 }
 
+func TestSearchFlagsArePassedToSearcher(t *testing.T) {
+	t.Parallel()
+
+	searcher := &fakeSearcher{results: []packageinfo.PackageCandidate{{
+		PackagePath: "github.com/spf13/cobra",
+		ModulePath:  "github.com/spf13/cobra",
+		Source:      packageinfo.SourceGitHub,
+	}}}
+	root := NewRootCommand(testApp(searcher, &fakeRunner{inside: true}))
+
+	_, _, err := executeCommand(root, "search", "cobra", "--limit", "3", "--source", "github", "--no-cache", "--refresh")
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	if searcher.keyword != "cobra" {
+		t.Fatalf("keyword = %q, want cobra", searcher.keyword)
+	}
+	if searcher.opts.Limit != 3 || searcher.opts.Source != packageinfo.SourceGitHub || !searcher.opts.NoCache || !searcher.opts.Refresh {
+		t.Fatalf("opts = %#v, want all search flags passed through", searcher.opts)
+	}
+}
+
 func TestAddDryRunDoesNotRunGoGet(t *testing.T) {
 	t.Parallel()
 
@@ -184,6 +224,29 @@ func TestAddDryRunDoesNotRunGoGet(t *testing.T) {
 	}
 	if runner.getCalled || runner.tidyCalled {
 		t.Fatalf("runner called during dry-run: get=%v tidy=%v", runner.getCalled, runner.tidyCalled)
+	}
+}
+
+func TestAddSearchFlagsArePassedToSearcher(t *testing.T) {
+	t.Parallel()
+
+	searcher := &fakeSearcher{results: []packageinfo.PackageCandidate{{
+		PackagePath: "github.com/spf13/cobra",
+		ModulePath:  "github.com/spf13/cobra",
+		Source:      packageinfo.SourceGitHub,
+	}}}
+	runner := &fakeRunner{inside: true}
+	root := NewRootCommand(testApp(searcher, runner))
+
+	_, _, err := executeCommand(root, "add", "cobra", "--dry-run", "--first", "--yes", "--limit", "4", "--source", "all", "--no-cache", "--refresh")
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	if searcher.keyword != "cobra" {
+		t.Fatalf("keyword = %q, want cobra", searcher.keyword)
+	}
+	if searcher.opts.Limit != 4 || searcher.opts.Source != packageinfo.SourceAll || !searcher.opts.NoCache || !searcher.opts.Refresh {
+		t.Fatalf("opts = %#v, want all add search flags passed through", searcher.opts)
 	}
 }
 
@@ -324,5 +387,154 @@ func TestAddRequiresGoModule(t *testing.T) {
 	}
 	if searcher.called {
 		t.Fatal("searcher was called before module check")
+	}
+}
+
+func TestVersionsResolvesPackagePathBeforeListing(t *testing.T) {
+	t.Parallel()
+
+	resolver := &fakeResolver{modulePath: "google.golang.org/grpc"}
+	runner := &fakeRunner{listVersions: []string{"v1.80.0", "v1.81.0"}}
+	root := NewRootCommand(&App{
+		Searcher:  &fakeSearcher{},
+		Resolver:  resolver,
+		Runner:    runner,
+		Favorites: fakeFavorites{values: map[string]string{}},
+		Selector:  &fakeSelector{},
+		Latest:    &fakeLatest{},
+		Opener:    &fakeOpener{},
+	})
+
+	stdout, _, err := executeCommand(root, "versions", "google.golang.org/grpc/status")
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	if !resolver.called {
+		t.Fatal("resolver was not called")
+	}
+	if resolver.lastCandidate.PackagePath != "google.golang.org/grpc/status" {
+		t.Fatalf("resolver candidate = %#v, want package path input", resolver.lastCandidate)
+	}
+	if runner.listModule != "google.golang.org/grpc" {
+		t.Fatalf("ListVersions module = %q, want google.golang.org/grpc", runner.listModule)
+	}
+	if stdout != "v1.80.0\nv1.81.0\n" {
+		t.Fatalf("stdout = %q, want listed versions", stdout)
+	}
+}
+
+func TestVersionsReturnsErrorWhenNoVersionsFound(t *testing.T) {
+	t.Parallel()
+
+	root := NewRootCommand(&App{
+		Searcher:  &fakeSearcher{},
+		Resolver:  &fakeResolver{modulePath: "example.com/module"},
+		Runner:    &fakeRunner{},
+		Favorites: fakeFavorites{values: map[string]string{}},
+		Selector:  &fakeSelector{},
+		Latest:    &fakeLatest{},
+		Opener:    &fakeOpener{},
+	})
+
+	_, _, err := executeCommand(root, "versions", "example.com/module")
+	if err == nil {
+		t.Fatal("Execute returned nil error, want no versions error")
+	}
+	if !strings.Contains(err.Error(), "no versions found") {
+		t.Fatalf("error = %v, want no versions message", err)
+	}
+}
+
+func TestLatestResolvesPackagePathBeforeLookup(t *testing.T) {
+	t.Parallel()
+
+	resolver := &fakeResolver{modulePath: "google.golang.org/grpc"}
+	latest := &fakeLatest{}
+	root := NewRootCommand(&App{
+		Searcher:  &fakeSearcher{},
+		Resolver:  resolver,
+		Runner:    &fakeRunner{},
+		Favorites: fakeFavorites{values: map[string]string{}},
+		Selector:  &fakeSelector{},
+		Latest:    latest,
+		Opener:    &fakeOpener{},
+	})
+
+	stdout, _, err := executeCommand(root, "latest", "google.golang.org/grpc/status")
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	if !resolver.called {
+		t.Fatal("resolver was not called")
+	}
+	if latest.module != "google.golang.org/grpc" {
+		t.Fatalf("Latest module = %q, want google.golang.org/grpc", latest.module)
+	}
+	if !strings.Contains(stdout, "v1.28.0") {
+		t.Fatalf("stdout = %q, want latest version", stdout)
+	}
+}
+
+func TestDocCommandOpensResolvedURL(t *testing.T) {
+	t.Parallel()
+
+	opener := &fakeOpener{}
+	root := NewRootCommand(&App{
+		Searcher:  &fakeSearcher{},
+		Resolver:  &fakeResolver{modulePath: "go.uber.org/zap"},
+		Runner:    &fakeRunner{},
+		Favorites: fakeFavorites{values: map[string]string{}},
+		Selector:  &fakeSelector{},
+		Latest:    &fakeLatest{},
+		Opener:    opener,
+	})
+
+	stdout, _, err := executeCommand(root, "doc", "go.uber.org/zap")
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	if opener.url != "https://pkg.go.dev/go.uber.org/zap" {
+		t.Fatalf("opened url = %q, want pkg.go.dev URL", opener.url)
+	}
+	if !strings.Contains(stdout, opener.url) {
+		t.Fatalf("stdout = %q, want opened URL", stdout)
+	}
+}
+
+func TestFavoriteCommands(t *testing.T) {
+	t.Parallel()
+
+	root := NewRootCommand(&App{
+		Searcher:  &fakeSearcher{},
+		Resolver:  &fakeResolver{modulePath: "go.uber.org/zap"},
+		Runner:    &fakeRunner{},
+		Favorites: fakeFavorites{values: map[string]string{"logger": "go.uber.org/zap"}},
+		Selector:  &fakeSelector{},
+		Latest:    &fakeLatest{},
+		Opener:    &fakeOpener{},
+	})
+
+	stdout, _, err := executeCommand(root, "fav")
+	if err != nil {
+		t.Fatalf("fav returned error: %v", err)
+	}
+	if !strings.Contains(stdout, "logger\tgo.uber.org/zap") {
+		t.Fatalf("stdout = %q, want favorite listing", stdout)
+	}
+
+	stdout, _, err = executeCommand(root, "addfav", "zap", "go.uber.org/zap")
+	if err != nil {
+		t.Fatalf("addfav returned error: %v", err)
+	}
+	if !strings.Contains(stdout, "Added favorite zap -> go.uber.org/zap") {
+		t.Fatalf("stdout = %q, want add message", stdout)
+	}
+
+	stdout, _, err = executeCommand(root, "rmfav", "zap")
+	if err != nil {
+		t.Fatalf("rmfav returned error: %v", err)
+	}
+	if !strings.Contains(stdout, "Removed favorite zap") {
+		t.Fatalf("stdout = %q, want remove message", stdout)
 	}
 }

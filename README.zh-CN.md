@@ -17,7 +17,7 @@
 推荐安装固定版本：
 
 ```bash
-go install github.com/yorha2B0826/gogetx@v0.1.2
+go install github.com/yorha2B0826/gogetx@v0.1.3
 ```
 
 也可以安装最新版本：
@@ -53,8 +53,8 @@ gogetx completion install powershell
 ```bash
 gogetx search <keyword>
 gogetx add <keyword>
-gogetx versions <module>
-gogetx latest <module>
+gogetx versions <module-or-package>
+gogetx latest <module-or-package>
 gogetx doc <target>
 gogetx fav
 gogetx addfav <alias> <module>
@@ -71,7 +71,9 @@ gogetx add zap
 gogetx add echo --dry-run --first --yes
 gogetx add grpc --version latest --first --yes
 gogetx versions go.uber.org/zap
+gogetx versions google.golang.org/grpc/status
 gogetx latest go.uber.org/zap
+gogetx latest google.golang.org/grpc/status
 gogetx doc go.uber.org/zap
 ```
 

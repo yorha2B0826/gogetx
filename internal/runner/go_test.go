@@ -70,3 +70,21 @@ func TestGetTidyAndListVersionsUseGoCommands(t *testing.T) {
 		}
 	}
 }
+
+func TestListVersionsReturnsErrorWhenOutputHasNoVersions(t *testing.T) {
+	t.Parallel()
+
+	r := NewWithExecutor(&fakeExecutor{
+		outputs: map[string]string{
+			"go list -m -versions google.golang.org/grpc/status": "google.golang.org/grpc/status\n",
+		},
+	})
+
+	_, err := r.ListVersions(context.Background(), "google.golang.org/grpc/status")
+	if err == nil {
+		t.Fatal("ListVersions returned nil error, want no versions error")
+	}
+	if !strings.Contains(err.Error(), "no versions found") {
+		t.Fatalf("error = %v, want no versions message", err)
+	}
+}

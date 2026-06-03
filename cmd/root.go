@@ -134,9 +134,16 @@ func newVersionsCommand(app *App) *cobra.Command {
 		Short: "List available module versions",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			versions, err := app.Runner.ListVersions(cmd.Context(), args[0])
+			modulePath, err := resolveModulePath(cmd, app, args[0])
 			if err != nil {
 				return err
+			}
+			versions, err := app.Runner.ListVersions(cmd.Context(), modulePath)
+			if err != nil {
+				return err
+			}
+			if len(versions) == 0 {
+				return fmt.Errorf("no versions found for module %q", modulePath)
 			}
 			for _, version := range versions {
 				fmt.Fprintln(cmd.OutOrStdout(), version)
@@ -152,7 +159,11 @@ func newLatestCommand(app *App) *cobra.Command {
 		Short: "Show the latest module version from the Go proxy",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			info, err := app.Latest.Latest(cmd.Context(), args[0])
+			modulePath, err := resolveModulePath(cmd, app, args[0])
+			if err != nil {
+				return err
+			}
+			info, err := app.Latest.Latest(cmd.Context(), modulePath)
 			if err != nil {
 				return err
 			}
@@ -164,6 +175,12 @@ func newLatestCommand(app *App) *cobra.Command {
 			return nil
 		},
 	}
+}
+
+func resolveModulePath(cmd *cobra.Command, app *App, input string) (string, error) {
+	return app.Resolver.Resolve(cmd.Context(), packageinfo.PackageCandidate{
+		PackagePath: input,
+	})
 }
 
 func newDocCommand(app *App) *cobra.Command {

@@ -14,6 +14,9 @@ import (
 
 const (
 	loadMoreSource = "__gogetx_load_more__"
+	// maxSearchPages bounds the number of pages --all will fetch so a very
+	// broad keyword cannot trigger an unbounded number of network requests.
+	maxSearchPages = 25
 )
 
 func NewRootCommand(app *App) *Command {
@@ -68,7 +71,7 @@ func newSearchCommand(app *App) *cobra.Command {
 			if jsonOutput {
 				encoder := json.NewEncoder(cmd.OutOrStdout())
 				encoder.SetIndent("", "  ")
-				return encoder.Encode(page.Results)
+				return encoder.Encode(page)
 			}
 			printCandidates(cmd, page.Results)
 			if !allPages && page.NextPageToken != "" {
@@ -162,7 +165,7 @@ func newVersionsCommand(app *App) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			versions, err := app.Runner.ListVersions(cmd.Context(), modulePath)
+			versions, err := app.Latest.ListVersions(cmd.Context(), modulePath)
 			if err != nil {
 				return err
 			}
@@ -227,16 +230,23 @@ func resolveModulePath(cmd *cobra.Command, app *App, input string) (string, erro
 }
 
 func newDocCommand(app *App) *cobra.Command {
-	return &cobra.Command{
+	var printOnly bool
+	command := &cobra.Command{
 		Use:   "doc <target>",
 		Short: "Open pkg.go.dev documentation or search",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			url := doc.URLFor(args[0])
+			if printOnly {
+				fmt.Fprintln(cmd.OutOrStdout(), url)
+				return nil
+			}
 			fmt.Fprintf(cmd.OutOrStdout(), "Opening %s\n", url)
 			return app.Opener.Open(cmd.Context(), url)
 		},
 	}
+	command.Flags().BoolVar(&printOnly, "print", false, "print the documentation URL without opening it")
+	return command
 }
 
 func newFavCommand(app *App) *cobra.Command {
@@ -341,14 +351,14 @@ func collectSearchPages(cmd *cobra.Command, searcher Searcher, keyword string, o
 	seenResults := map[string]bool{}
 	seenTokens := map[string]bool{}
 
-	for {
+	for pagesFetched := 0; ; pagesFetched++ {
 		page, err := searchPage(cmd, searcher, keyword, opts)
 		if err != nil {
 			return packageinfo.SearchPage{}, err
 		}
 		total = page.Total
 		for _, result := range page.Results {
-			key := result.ModulePath + "|" + result.PackagePath
+			key := result.DedupeKey()
 			if seenResults[key] {
 				continue
 			}
@@ -362,6 +372,9 @@ func collectSearchPages(cmd *cobra.Command, searcher Searcher, keyword string, o
 			return packageinfo.SearchPage{}, fmt.Errorf("search pagination returned a repeated page token")
 		}
 		seenTokens[page.NextPageToken] = true
+		if pagesFetched+1 >= maxSearchPages {
+			return packageinfo.SearchPage{}, fmt.Errorf("stopped after %d pages; the keyword is too broad, try a more specific one", maxSearchPages)
+		}
 		opts.PageToken = page.NextPageToken
 	}
 }
@@ -415,7 +428,7 @@ func selectCandidate(cmd *cobra.Command, app *App, keyword string, opts packagei
 			return packageinfo.PackageCandidate{}, err
 		}
 		for _, result := range page.Results {
-			key := result.ModulePath + "|" + result.PackagePath
+			key := result.DedupeKey()
 			if seenResults[key] {
 				continue
 			}

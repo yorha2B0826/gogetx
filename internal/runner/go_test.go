@@ -35,14 +35,10 @@ func TestIsInsideModuleUsesGoEnvGOMOD(t *testing.T) {
 	}
 }
 
-func TestGetTidyAndListVersionsUseGoCommands(t *testing.T) {
+func TestGetAndTidyUseGoCommands(t *testing.T) {
 	t.Parallel()
 
-	exec := &fakeExecutor{
-		outputs: map[string]string{
-			"go list -m -versions go.uber.org/zap": "go.uber.org/zap v1.27.0 v1.28.0\n",
-		},
-	}
+	exec := &fakeExecutor{outputs: map[string]string{}}
 	r := NewWithExecutor(exec)
 
 	if err := r.Get(context.Background(), "go.uber.org/zap", "latest"); err != nil {
@@ -51,40 +47,14 @@ func TestGetTidyAndListVersionsUseGoCommands(t *testing.T) {
 	if err := r.ModTidy(context.Background()); err != nil {
 		t.Fatalf("ModTidy returned error: %v", err)
 	}
-	versions, err := r.ListVersions(context.Background(), "go.uber.org/zap")
-	if err != nil {
-		t.Fatalf("ListVersions returned error: %v", err)
-	}
-	if strings.Join(versions, ",") != "v1.27.0,v1.28.0" {
-		t.Fatalf("versions = %v, want [v1.27.0 v1.28.0]", versions)
-	}
 
 	gotCalls := strings.Join(exec.calls, "\n")
 	for _, want := range []string{
 		"go get go.uber.org/zap@latest",
 		"go mod tidy",
-		"go list -m -versions go.uber.org/zap",
 	} {
 		if !strings.Contains(gotCalls, want) {
 			t.Fatalf("calls = %q, missing %q", gotCalls, want)
 		}
-	}
-}
-
-func TestListVersionsReturnsErrorWhenOutputHasNoVersions(t *testing.T) {
-	t.Parallel()
-
-	r := NewWithExecutor(&fakeExecutor{
-		outputs: map[string]string{
-			"go list -m -versions google.golang.org/grpc/status": "google.golang.org/grpc/status\n",
-		},
-	})
-
-	_, err := r.ListVersions(context.Background(), "google.golang.org/grpc/status")
-	if err == nil {
-		t.Fatal("ListVersions returned nil error, want no versions error")
-	}
-	if !strings.Contains(err.Error(), "no versions found") {
-		t.Fatalf("error = %v, want no versions message", err)
 	}
 }

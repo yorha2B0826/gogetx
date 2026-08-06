@@ -162,15 +162,18 @@ func normalizeSearchText(s string) string {
 	return b.String()
 }
 
+// fuzzySubsequence reports whether needle appears in haystack in order. It
+// indexes runes (not bytes) so multi-byte inputs remain correct.
 func fuzzySubsequence(needle string, haystack string) bool {
 	if needle == "" {
 		return true
 	}
+	needleRunes := []rune(needle)
 	i := 0
 	for _, r := range haystack {
-		if rune(needle[i]) == r {
+		if needleRunes[i] == r {
 			i++
-			if i == len(needle) {
+			if i == len(needleRunes) {
 				return true
 			}
 		}

@@ -74,3 +74,30 @@ func TestCandidateMatchesSearchUsesPathModuleAndSynopsis(t *testing.T) {
 		t.Fatal("candidateMatchesSearch(zaplogger) = true, want false")
 	}
 }
+
+func TestFuzzySubsequenceHandlesMultibyteRunes(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		needle   string
+		haystack string
+		want     bool
+	}{
+		{name: "ascii subsequence", needle: "zap", haystack: "go.uber.org/zap", want: true},
+		{name: "ascii non-subsequence", needle: "apz", haystack: "zap", want: false},
+		{name: "multibyte subsequence", needle: "жз", haystack: "ажбзв", want: true},
+		{name: "multibyte non-subsequence", needle: "зж", haystack: "ажбзв", want: false},
+		{name: "empty needle", needle: "", haystack: "anything", want: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := fuzzySubsequence(tt.needle, tt.haystack); got != tt.want {
+				t.Fatalf("fuzzySubsequence(%q, %q) = %v, want %v", tt.needle, tt.haystack, got, tt.want)
+			}
+		})
+	}
+}

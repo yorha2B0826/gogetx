@@ -80,6 +80,7 @@ gogetx latest go.uber.org/zap
 gogetx latest google.golang.org/grpc/status
 gogetx version
 gogetx doc go.uber.org/zap
+gogetx doc go.uber.org/zap --print
 ```
 
 ## Safe `add` Behavior
@@ -96,7 +97,7 @@ go mod init example.com/myapp
 - `--first`: choose the first search result without interactive selection.
 - Use `--first --yes` for scripts or non-interactive environments.
 - The default page size is 30 results; when the interactive selector shows `Load more results`, choose it to load the next page of candidates.
-- `--all`: fetch all available search pages before opening interactive selection. This is useful when you want the full result set first and then filter locally. Broad keywords may require multiple network requests.
+- `--all`: fetch all available search pages (up to 25) before opening interactive selection. This is useful when you want the full result set first and then filter locally. Broad keywords may require multiple network requests; if the page cap is reached, gogetx tells you to use a more specific keyword.
 - By default, `gogetx add` does not run `go mod tidy`, so newly added packages remain in `go.mod` / `go.sum` before you import them.
 - `--tidy`: additionally run `go mod tidy` after `go get`. If your source code does not import the package yet, Go may remove the newly added dependency.
 - `--dry-run` only prints commands and never runs `go get` or `go mod tidy`.
@@ -131,7 +132,8 @@ gogetx search air --all --limit 30
 ```
 
 - `--page N`: show page N. pkg.go.dev uses token pagination, so `gogetx` fetches prior page tokens before printing the requested page.
-- `--all`: keep fetching available pages and print them together. Broad keywords may require multiple network requests.
+- `--all`: keep fetching available pages (up to 25) and print them together. Broad keywords may require multiple network requests; if the page cap is reached, gogetx tells you to use a more specific keyword.
+- `search --json` prints `{ "results": [...], "total": N, "nextPageToken": "..." }`, so scripts can read the total and paginate.
 - When `--all` is not used and another page exists, the output includes a next-page command hint.
 
 Available sources:
@@ -146,6 +148,14 @@ GitHub fallback searches Go repositories, reads each repository's `go.mod`, and 
 
 ```bash
 GITHUB_TOKEN=your_token_here gogetx search cobra --source github
+```
+
+## Versions And Module Resolution
+
+`versions`, `latest`, and the module resolution used by `add` query the Go module proxy directly (default `https://proxy.golang.org`) instead of shelling out to `go list`, so nothing is written to your local module cache. The proxy URL honors the `GOPROXY` environment variable (the first `http(s)://` entry), for example:
+
+```bash
+GOPROXY=https://goproxy.cn,direct gogetx versions go.uber.org/zap
 ```
 
 ## Cache And Config

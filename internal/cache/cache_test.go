@@ -1,6 +1,8 @@
 package cache
 
 import (
+	"encoding/json"
+	"os"
 	"testing"
 	"time"
 
@@ -97,5 +99,78 @@ func TestStoreCachesSearchPagesByPageToken(t *testing.T) {
 	}
 	if gotSecond.Results[0].PackagePath != "example.com/second" {
 		t.Fatalf("second result = %#v, want second page", gotSecond.Results)
+	}
+}
+
+func TestStoreTreatsCorruptCacheAsMissAndSelfHeals(t *testing.T) {
+	t.Parallel()
+
+	path := t.TempDir() + "/search.json"
+	if err := os.WriteFile(path, []byte("{not valid json"), 0o644); err != nil {
+		t.Fatalf("WriteFile returned error: %v", err)
+	}
+	store := NewStore(path, time.Hour)
+	opts := packageinfo.SearchOptions{Source: "pkgsite", Limit: 10}
+
+	_, ok, err := store.Get("zap", opts)
+	if err != nil {
+		t.Fatalf("Get returned error on corrupt cache: %v", err)
+	}
+	if ok {
+		t.Fatal("ok = true, want miss for corrupt cache")
+	}
+
+	results := []packageinfo.PackageCandidate{{PackagePath: "go.uber.org/zap", ModulePath: "go.uber.org/zap"}}
+	if err := store.Set("zap", opts, results); err != nil {
+		t.Fatalf("Set returned error: %v", err)
+	}
+	got, ok, err := store.Get("zap", opts)
+	if err != nil {
+		t.Fatalf("Get returned error after self-heal: %v", err)
+	}
+	if !ok {
+		t.Fatal("ok = false, want hit after self-heal")
+	}
+	if len(got) != 1 || got[0].ModulePath != "go.uber.org/zap" {
+		t.Fatalf("results = %#v, want recovered zap result", got)
+	}
+}
+
+func TestStorePrunesExpiredEntriesOnWrite(t *testing.T) {
+	t.Parallel()
+
+	store := NewStore(t.TempDir()+"/search.json", time.Hour)
+	staleOpts := packageinfo.SearchOptions{Source: "pkgsite", Limit: 10}
+	freshOpts := packageinfo.SearchOptions{Source: "github", Limit: 10}
+
+	// Seed an expired entry directly, as if written by an older run.
+	stale := cacheFile{Entries: map[string]SearchCacheEntry{
+		cacheKey("old", staleOpts): {
+			Keyword:   "old",
+			Results:   []packageinfo.PackageCandidate{{PackagePath: "example.com/old"}},
+			CreatedAt: time.Now().Add(-2 * time.Hour),
+		},
+	}}
+	if err := store.write(stale); err != nil {
+		t.Fatalf("write returned error: %v", err)
+	}
+
+	if err := store.Set("fresh", freshOpts, []packageinfo.PackageCandidate{{PackagePath: "example.com/fresh"}}); err != nil {
+		t.Fatalf("Set returned error: %v", err)
+	}
+
+	content, err := os.ReadFile(store.path)
+	if err != nil {
+		t.Fatalf("ReadFile returned error: %v", err)
+	}
+	var got cacheFile
+	if err := json.Unmarshal(content, &got); err != nil {
+		t.Fatalf("Unmarshal returned error: %v", err)
+	}
+	if _, ok := got.Entries[cacheKey("old", staleOpts)]; ok {
+		t.Fatal("expired entry was not pruned from cache")
+	}
+	if _, ok := got.Entries[cacheKey("fresh", freshOpts)]; !ok {
+		t.Fatal("fresh entry is missing after prune")
 	}
 }

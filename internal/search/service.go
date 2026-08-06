@@ -3,6 +3,7 @@ package search
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"github.com/yorha2B0826/gogetx/internal/cache"
 	"github.com/yorha2B0826/gogetx/internal/packageinfo"
@@ -73,33 +74,44 @@ func (s *Service) searchFreshPage(ctx context.Context, keyword string, opts pack
 		}
 		return searchPage(ctx, s.GitHub, keyword, opts)
 	case packageinfo.SourceAll:
-		var combined []packageinfo.PackageCandidate
-		var firstErr error
-		var nextPageToken string
-		var total int
+		var pkgsitePage packageinfo.SearchPage
+		var pkgsiteErr error
+		var githubResults []packageinfo.PackageCandidate
+		var githubErr error
+
+		var wg sync.WaitGroup
 		if s.Pkgsite != nil {
-			page, err := searchPage(ctx, s.Pkgsite, keyword, opts)
-			if err != nil && firstErr == nil {
-				firstErr = err
-			}
-			combined = append(combined, page.Results...)
-			nextPageToken = page.NextPageToken
-			total += page.Total
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				pkgsitePage, pkgsiteErr = searchPage(ctx, s.Pkgsite, keyword, opts)
+			}()
 		}
 		if opts.PageToken == "" && s.GitHub != nil {
-			results, err := s.GitHub.Search(ctx, keyword, opts)
-			if err != nil && firstErr == nil {
-				firstErr = err
-			}
-			combined = append(combined, results...)
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				githubResults, githubErr = s.GitHub.Search(ctx, keyword, opts)
+			}()
 		}
+		wg.Wait()
+
+		var firstErr error
+		if pkgsiteErr != nil {
+			firstErr = pkgsiteErr
+		} else if githubErr != nil {
+			firstErr = githubErr
+		}
+		combined := make([]packageinfo.PackageCandidate, 0, len(pkgsitePage.Results)+len(githubResults))
+		combined = append(combined, pkgsitePage.Results...)
+		combined = append(combined, githubResults...)
 		if len(combined) == 0 && firstErr != nil {
 			return packageinfo.SearchPage{}, firstErr
 		}
 		return packageinfo.SearchPage{
-			Results:       dedupe(combined),
-			NextPageToken: nextPageToken,
-			Total:         total,
+			Results:       packageinfo.DedupeCandidates(combined),
+			NextPageToken: pkgsitePage.NextPageToken,
+			Total:         pkgsitePage.Total,
 		}, nil
 	default:
 		return packageinfo.SearchPage{}, fmt.Errorf("unsupported source %q", opts.Source)
@@ -115,18 +127,4 @@ func searchPage(ctx context.Context, searcher SourceSearcher, keyword string, op
 		return packageinfo.SearchPage{}, err
 	}
 	return packageinfo.SearchPage{Results: results}, nil
-}
-
-func dedupe(results []packageinfo.PackageCandidate) []packageinfo.PackageCandidate {
-	seen := map[string]bool{}
-	out := make([]packageinfo.PackageCandidate, 0, len(results))
-	for _, result := range results {
-		key := result.ModulePath + "|" + result.PackagePath
-		if seen[key] {
-			continue
-		}
-		seen[key] = true
-		out = append(out, result)
-	}
-	return out
 }

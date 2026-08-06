@@ -38,7 +38,6 @@ type Resolver interface {
 type Runner interface {
 	Get(ctx context.Context, modulePath string, version string) error
 	ModTidy(ctx context.Context) error
-	ListVersions(ctx context.Context, modulePath string) ([]string, error)
 	IsInsideModule(ctx context.Context) (bool, error)
 }
 
@@ -54,8 +53,9 @@ type Selector interface {
 	Confirm(message string) (bool, error)
 }
 
-type LatestClient interface {
+type VersionSource interface {
 	Latest(ctx context.Context, modulePath string) (goproxy.VersionInfo, error)
+	ListVersions(ctx context.Context, modulePath string) ([]string, error)
 }
 
 type Opener interface {
@@ -68,23 +68,24 @@ type App struct {
 	Runner    Runner
 	Favorites Favorites
 	Selector  Selector
-	Latest    LatestClient
+	Latest    VersionSource
 	Opener    Opener
 }
 
 func NewDefaultApp() *App {
 	goRunner := runner.New()
+	proxyClient := goproxy.NewClient()
 	return &App{
 		Searcher: &searchsvc.Service{
 			Pkgsite: pkgsite.NewClient(),
 			GitHub:  github.NewClient(),
 			Cache:   cache.NewStore(defaultCachePath(), 24*time.Hour),
 		},
-		Resolver:  resolver.New(goRunner),
+		Resolver:  resolver.New(proxyClient),
 		Runner:    goRunner,
 		Favorites: config.NewManager(defaultConfigPath()),
 		Selector:  ui.New(),
-		Latest:    goproxy.NewClient(),
+		Latest:    proxyClient,
 		Opener:    browser.New(),
 	}
 }

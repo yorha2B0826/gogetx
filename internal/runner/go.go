@@ -96,18 +96,6 @@ func (r *GoRunner) ModTidy(ctx context.Context) error {
 	return err
 }
 
-func (r *GoRunner) ListVersions(ctx context.Context, modulePath string) ([]string, error) {
-	output, err := r.executor.Execute(ctx, "go", []string{"list", "-m", "-versions", modulePath}, ExecOptions{})
-	if err != nil {
-		return nil, err
-	}
-	fields := strings.Fields(output)
-	if len(fields) <= 1 {
-		return nil, fmt.Errorf("no versions found for module %q", modulePath)
-	}
-	return fields[1:], nil
-}
-
 func (r *GoRunner) IsInsideModule(ctx context.Context) (bool, error) {
 	output, err := r.executor.Execute(ctx, "go", []string{"env", "GOMOD"}, ExecOptions{})
 	if err != nil {

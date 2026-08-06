@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -63,13 +64,11 @@ func (f *fakeResolver) Resolve(_ context.Context, candidate packageinfo.PackageC
 }
 
 type fakeRunner struct {
-	inside       bool
-	getCalled    bool
-	tidyCalled   bool
-	listVersions []string
-	getModule    string
-	getVersion   string
-	listModule   string
+	inside     bool
+	getCalled  bool
+	tidyCalled bool
+	getModule  string
+	getVersion string
 }
 
 func (f *fakeRunner) Get(_ context.Context, modulePath, version string) error {
@@ -82,11 +81,6 @@ func (f *fakeRunner) Get(_ context.Context, modulePath, version string) error {
 func (f *fakeRunner) ModTidy(_ context.Context) error {
 	f.tidyCalled = true
 	return nil
-}
-
-func (f *fakeRunner) ListVersions(_ context.Context, modulePath string) ([]string, error) {
-	f.listModule = modulePath
-	return f.listVersions, nil
 }
 
 func (f *fakeRunner) IsInsideModule(_ context.Context) (bool, error) {
@@ -142,12 +136,19 @@ func (f *fakeSelector) Confirm(message string) (bool, error) {
 }
 
 type fakeLatest struct {
-	module string
+	module       string
+	listVersions []string
+	listModule   string
 }
 
 func (f *fakeLatest) Latest(_ context.Context, modulePath string) (goproxy.VersionInfo, error) {
 	f.module = modulePath
 	return goproxy.VersionInfo{Version: "v1.28.0"}, nil
+}
+
+func (f *fakeLatest) ListVersions(_ context.Context, modulePath string) ([]string, error) {
+	f.listModule = modulePath
+	return f.listVersions, nil
 }
 
 type fakeOpener struct {
@@ -202,12 +203,12 @@ func TestSearchJSON(t *testing.T) {
 		t.Fatalf("Execute returned error: %v", err)
 	}
 
-	var got []packageinfo.PackageCandidate
+	var got packageinfo.SearchPage
 	if err := json.Unmarshal([]byte(stdout), &got); err != nil {
 		t.Fatalf("stdout is not JSON: %q", stdout)
 	}
-	if len(got) != 1 || got[0].ModulePath != "go.uber.org/zap" {
-		t.Fatalf("results = %#v, want zap result", got)
+	if len(got.Results) != 1 || got.Results[0].ModulePath != "go.uber.org/zap" {
+		t.Fatalf("results = %#v, want zap result", got.Results)
 	}
 }
 
@@ -382,6 +383,35 @@ func TestSearchPrintsNextPageHint(t *testing.T) {
 	}
 	if !strings.Contains(stdout, "More results available") || !strings.Contains(stdout, "gogetx search air --page 2 --limit 2") {
 		t.Fatalf("stdout = %q, want next page hint", stdout)
+	}
+}
+
+func TestSearchAllStopsAfterMaxPages(t *testing.T) {
+	t.Parallel()
+
+	calls := 0
+	searcher := &fakeSearcher{
+		searchPage: func(_ string, _ packageinfo.SearchOptions) (packageinfo.SearchPage, error) {
+			calls++
+			return packageinfo.SearchPage{
+				Results: []packageinfo.PackageCandidate{
+					{PackagePath: fmt.Sprintf("example.com/page%d", calls), ModulePath: "example.com/page"},
+				},
+				NextPageToken: fmt.Sprintf("token-%d", calls),
+			}, nil
+		},
+	}
+	root := NewRootCommand(testApp(searcher, &fakeRunner{inside: true}))
+
+	_, _, err := executeCommand(root, "search", "air", "--all")
+	if err == nil {
+		t.Fatal("Execute returned nil error, want page cap error")
+	}
+	if !strings.Contains(err.Error(), "too broad") {
+		t.Fatalf("error = %v, want page cap message", err)
+	}
+	if calls != maxSearchPages {
+		t.Fatalf("searcher calls = %d, want %d", calls, maxSearchPages)
 	}
 }
 
@@ -708,14 +738,14 @@ func TestVersionsResolvesPackagePathBeforeListing(t *testing.T) {
 	t.Parallel()
 
 	resolver := &fakeResolver{modulePath: "google.golang.org/grpc"}
-	runner := &fakeRunner{listVersions: []string{"v1.80.0", "v1.81.0"}}
+	latest := &fakeLatest{listVersions: []string{"v1.80.0", "v1.81.0"}}
 	root := NewRootCommand(&App{
 		Searcher:  &fakeSearcher{},
 		Resolver:  resolver,
-		Runner:    runner,
+		Runner:    &fakeRunner{},
 		Favorites: fakeFavorites{values: map[string]string{}},
 		Selector:  &fakeSelector{},
-		Latest:    &fakeLatest{},
+		Latest:    latest,
 		Opener:    &fakeOpener{},
 	})
 
@@ -729,8 +759,8 @@ func TestVersionsResolvesPackagePathBeforeListing(t *testing.T) {
 	if resolver.lastCandidate.PackagePath != "google.golang.org/grpc/status" {
 		t.Fatalf("resolver candidate = %#v, want package path input", resolver.lastCandidate)
 	}
-	if runner.listModule != "google.golang.org/grpc" {
-		t.Fatalf("ListVersions module = %q, want google.golang.org/grpc", runner.listModule)
+	if latest.listModule != "google.golang.org/grpc" {
+		t.Fatalf("ListVersions module = %q, want google.golang.org/grpc", latest.listModule)
 	}
 	if stdout != "v1.80.0\nv1.81.0\n" {
 		t.Fatalf("stdout = %q, want listed versions", stdout)
@@ -857,6 +887,32 @@ func TestDocCommandOpensResolvedURL(t *testing.T) {
 	}
 	if !strings.Contains(stdout, opener.url) {
 		t.Fatalf("stdout = %q, want opened URL", stdout)
+	}
+}
+
+func TestDocPrintOnlyPrintsURL(t *testing.T) {
+	t.Parallel()
+
+	opener := &fakeOpener{}
+	root := NewRootCommand(&App{
+		Searcher:  &fakeSearcher{},
+		Resolver:  &fakeResolver{modulePath: "go.uber.org/zap"},
+		Runner:    &fakeRunner{},
+		Favorites: fakeFavorites{values: map[string]string{}},
+		Selector:  &fakeSelector{},
+		Latest:    &fakeLatest{},
+		Opener:    opener,
+	})
+
+	stdout, _, err := executeCommand(root, "doc", "go.uber.org/zap", "--print")
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	if opener.url != "" {
+		t.Fatalf("opened url = %q, want none with --print", opener.url)
+	}
+	if stdout != "https://pkg.go.dev/go.uber.org/zap\n" {
+		t.Fatalf("stdout = %q, want URL only", stdout)
 	}
 }
 

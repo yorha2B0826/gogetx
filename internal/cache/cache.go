@@ -39,15 +39,14 @@ func (s *Store) Get(keyword string, opts packageinfo.SearchOptions) ([]packagein
 	if err != nil {
 		return nil, false, err
 	}
-	return page.Results, ok, nil
+	if !ok {
+		return nil, false, nil
+	}
+	return page.Results, true, nil
 }
 
 func (s *Store) GetPage(keyword string, opts packageinfo.SearchOptions) (packageinfo.SearchPage, bool, error) {
-	data, err := s.read()
-	if err != nil {
-		return packageinfo.SearchPage{}, false, err
-	}
-	entry, ok := data.Entries[cacheKey(keyword, opts)]
+	entry, ok := s.read().Entries[cacheKey(keyword, opts)]
 	if !ok {
 		return packageinfo.SearchPage{}, false, nil
 	}
@@ -66,10 +65,8 @@ func (s *Store) Set(keyword string, opts packageinfo.SearchOptions, results []pa
 }
 
 func (s *Store) SetPage(keyword string, opts packageinfo.SearchOptions, page packageinfo.SearchPage) error {
-	data, err := s.read()
-	if err != nil {
-		return err
-	}
+	data := s.read()
+	pruneExpired(data.Entries, s.ttl, s.now())
 	data.Entries[cacheKey(keyword, opts)] = SearchCacheEntry{
 		Keyword:       keyword,
 		Results:       page.Results,
@@ -88,36 +85,70 @@ type cacheFile struct {
 	Entries map[string]SearchCacheEntry `json:"entries"`
 }
 
-func (s *Store) read() (cacheFile, error) {
+// read loads the cache file as best-effort: a missing, unreadable, or corrupt
+// file is treated as an empty cache so a bad cache can never break a search.
+// The next Set overwrites it, so a corrupt file self-heals.
+func (s *Store) read() cacheFile {
 	data := cacheFile{Entries: map[string]SearchCacheEntry{}}
 	content, err := os.ReadFile(s.path)
 	if errors.Is(err, os.ErrNotExist) {
-		return data, nil
+		return data
 	}
 	if err != nil {
-		return data, err
+		return data
 	}
 	if len(strings.TrimSpace(string(content))) == 0 {
-		return data, nil
+		return data
 	}
 	if err := json.Unmarshal(content, &data); err != nil {
-		return data, fmt.Errorf("read search cache: %w", err)
+		return data
 	}
 	if data.Entries == nil {
 		data.Entries = map[string]SearchCacheEntry{}
 	}
-	return data, nil
+	return data
 }
 
+// write persists the cache atomically by writing to a temp file in the same
+// directory and renaming over the target, so a crash mid-write never leaves a
+// truncated cache behind.
 func (s *Store) write(data cacheFile) error {
-	if err := os.MkdirAll(filepath.Dir(s.path), 0o755); err != nil {
+	dir := filepath.Dir(s.path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
 	content, err := json.MarshalIndent(data, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(s.path, append(content, '\n'), 0o644)
+	content = append(content, '\n')
+
+	tmp, err := os.CreateTemp(dir, "search-*.tmp")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name())
+	if _, err := tmp.Write(content); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Chmod(tmp.Name(), 0o644); err != nil {
+		return err
+	}
+	return os.Rename(tmp.Name(), s.path)
+}
+
+// pruneExpired drops entries whose TTL has passed, keeping the cache file from
+// growing without bound.
+func pruneExpired(entries map[string]SearchCacheEntry, ttl time.Duration, now time.Time) {
+	for key, entry := range entries {
+		if !entry.CreatedAt.Add(ttl).After(now) {
+			delete(entries, key)
+		}
+	}
 }
 
 func cacheKey(keyword string, opts packageinfo.SearchOptions) string {

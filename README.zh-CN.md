@@ -80,6 +80,7 @@ gogetx latest go.uber.org/zap
 gogetx latest google.golang.org/grpc/status
 gogetx version
 gogetx doc go.uber.org/zap
+gogetx doc go.uber.org/zap --print
 ```
 
 ## `add` 的安全语义
@@ -96,7 +97,7 @@ go mod init example.com/myapp
 - `--first`：明确选择第一条搜索结果，不进入交互选择。
 - 脚本或非交互环境建议同时使用 `--first --yes`。
 - 默认每页搜索 30 条结果；交互选择列表末尾出现 `Load more results` 时，选择它会继续加载下一页候选。
-- `--all`：在进入交互选择前拉取所有可用搜索页，适合想一次看完整结果集再筛选的情况。关键词很宽泛时会进行多次网络请求。
+- `--all`：在进入交互选择前拉取所有可用搜索页（最多 25 页），适合想一次看完整结果集再筛选的情况。关键词很宽泛时会进行多次网络请求；超过页数上限会提示改用更具体的关键词。
 - 默认不运行 `go mod tidy`，确保刚添加但尚未 import 的依赖会保留在 `go.mod` / `go.sum` 中。
 - `--tidy`：在 `go get` 后额外运行 `go mod tidy`。如果项目源码还没有 import 该包，Go 可能会把刚添加的依赖移除。
 - `--dry-run` 只打印命令，不执行 `go get` 或 `go mod tidy`。
@@ -131,7 +132,8 @@ gogetx search air --all --limit 30
 ```
 
 - `--page N`：显示第 N 页。pkg.go.dev 使用 token 分页，`gogetx` 会按顺序获取前面的 token 后再展示目标页。
-- `--all`：持续获取所有可用页面并一次性输出。关键词很宽泛时可能会进行多次网络请求。
+- `--all`：持续获取所有可用页面并一次性输出（最多 25 页）。关键词很宽泛时可能会进行多次网络请求；超过页数上限会提示改用更具体的关键词。
+- `search --json` 输出 `{ "results": [...], "total": N, "nextPageToken": "..." }`，便于脚本获取总数并翻页。
 - 不带 `--all` 且还有后续页面时，输出末尾会给出下一页命令提示。
 
 可用来源：
@@ -146,6 +148,14 @@ GitHub fallback 会搜索 Go 仓库、读取仓库的 `go.mod`，再使用其中
 
 ```bash
 GITHUB_TOKEN=your_token_here gogetx search cobra --source github
+```
+
+## 版本查询与模块解析
+
+`versions`、`latest` 以及 `add` 里的模块解析都直接查询 Go module proxy（默认 `https://proxy.golang.org`），不再依赖 `go list` 子进程，也不会往本地 module cache 写入内容。proxy 地址遵循 `GOPROXY` 环境变量（取第一个 `http(s)://` 条目），例如：
+
+```bash
+GOPROXY=https://goproxy.cn,direct gogetx versions go.uber.org/zap
 ```
 
 ## 缓存与配置

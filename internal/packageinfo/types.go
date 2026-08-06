@@ -16,6 +16,26 @@ type PackageCandidate struct {
 	Source      string `json:"source" yaml:"source"`
 }
 
+// DedupeKey identifies a candidate across sources and pages.
+func (c PackageCandidate) DedupeKey() string {
+	return c.ModulePath + "|" + c.PackagePath
+}
+
+// DedupeCandidates removes repeated candidates while preserving order.
+func DedupeCandidates(results []PackageCandidate) []PackageCandidate {
+	seen := map[string]bool{}
+	out := make([]PackageCandidate, 0, len(results))
+	for _, result := range results {
+		key := result.DedupeKey()
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, result)
+	}
+	return out
+}
+
 type SearchOptions struct {
 	Limit     int
 	Source    string

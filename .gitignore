@@ -1,0 +1,13 @@
+# Binaries
+/gogetx
+/gogetx.exe
+
+# Test and coverage output
+*.test
+coverage.out
+coverage.html
+
+# Editor and OS
+.DS_Store
+.idea/
+.vscode/

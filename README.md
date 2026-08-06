@@ -2,6 +2,8 @@
 
 语言 / Language: [中文](README.md) | [English](README.en.md)
 
+> **状态 / Status:已归档 (Archived)** — 此项目已停止维护,仓库为只读。仍可通过 `go install` 安装最终版本 v0.2.0,或克隆后运行 `make build` 构建。
+
 `gogetx` 是一个 Go module 搜索与安装 CLI。它把“打开 pkg.go.dev 搜索、复制 module path、再运行 go get”的流程压缩到终端里完成。
 
 它适合这些场景：
@@ -17,7 +19,7 @@
 推荐安装固定版本：
 
 ```bash
-go install github.com/yorha2B0826/gogetx@v0.1.8
+go install github.com/yorha2B0826/gogetx@v0.2.0
 ```
 
 也可以安装最新版本：

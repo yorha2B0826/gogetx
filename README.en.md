@@ -2,6 +2,8 @@
 
 [中文](README.md)
 
+> **Status: archived** — This project is no longer maintained and the repository is read-only. You can still install the final release with `go install github.com/yorha2B0826/gogetx@v0.2.0`, or clone it and run `make build`.
+
 `gogetx` is a Go module search and install CLI. It moves the workflow of opening pkg.go.dev, searching, copying a module path, and running `go get` into one terminal tool.
 
 It is useful when:
@@ -17,7 +19,7 @@ Go 1.23 or newer is required.
 Recommended fixed version:
 
 ```bash
-go install github.com/yorha2B0826/gogetx@v0.1.8
+go install github.com/yorha2B0826/gogetx@v0.2.0
 ```
 
 Latest version:
